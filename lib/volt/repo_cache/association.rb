@@ -57,14 +57,14 @@ module Volt
       # Must be lazy initialization since it depends on
       # foreign_collection being lazily initialized.
       def reciprocal
-        debug __method__, __LINE__, ""
         unless @reciprocal
+          # debug __method__, __LINE__, ""
           @reciprocal = foreign_collection.associations.values.detect do |a|
-            debug __method__, __LINE__, "#{a.foreign_collection.name} ?==? #{local_collection.name}"
+            # debug __method__, __LINE__, "#{a.foreign_collection.name} ?==? #{local_collection.name}"
             a.foreign_collection.name == local_collection.name
           end
           @reciprocal = :nil unless @reciprocal
-          debug __method__, __LINE__, "reciprocal of #{self.inspect} is #{@reciprocal.inspect}"
+          # debug __method__, __LINE__, "reciprocal of #{self.inspect} is #{@reciprocal.inspect}"
         end
         @reciprocal == :nil ? nil : @reciprocal
       end
@@ -73,7 +73,8 @@ module Volt
         !!reciprocal
       end
 
-      def break_references
+      def break_references(caller: nil)
+        friends_only(__method__, caller)
         @local_collection = @foreign_collection = @reciprocal = nil
       end
 

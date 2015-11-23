@@ -20,7 +20,7 @@ module Volt
 
       def initialize(cache: nil, owner: nil, name: nil, options: {})
         # debug __method__, __LINE__, "name: #{name} options: #{options}"
-        super()
+        super(observer: self)
         @cache = cache
         @owner = owner
         @name = name
@@ -74,9 +74,7 @@ module Volt
       def append(model, error_if_present: true, error_unless_new: true, result: nil, notify: true)
         model = induct(model, error_unless_new: error_unless_new, error_if_present: error_if_present)
         result[0] = model if result
-        super(model)
-        # notify owner model(s) of appended model that it has been added
-        notify_associations(model, :append) if notify
+        super(model, notify: notify, caller: self)
         self
       end
 
@@ -94,19 +92,19 @@ module Volt
         associations.each_value {|e| e.break_references(caller: self)}
         @cache = @associations = @repo_collection = nil
         clear(caller: self)
+        clear_observers(caller: self)
       end
 
       # Add the given model to marked_for_destruction and remove from collection.
-      def mark_model_for_destruction(model)
+      # This should only be called by RepoCache::Model#mark_for_destruction!.
+      def mark_model_for_destruction(model: model, caller: nil)
+        friends_only(__method__, caller)
         # don't add if already in marked bucket
-        unless @marked_for_destruction.find {|e| e.id == model.id }
-          # prevent collection/model going in a circle on this
-          # (we don't know whether initial request was to
-          # self or to proxied model which in this collection)
-          model.mark_for_destruction! unless model.marked_for_destruction?
-          @marked_for_destruction << model
-          remove(model, error_if_absent: true, caller: self)
+        if @marked_for_destruction.detect {|e| e.id == model.id }
+          raise RuntimeError, "#{model} already in #{self.name} @marked_for_destruction"
         end
+        @marked_for_destruction << model
+        remove(model, error_if_absent: true, caller: self)
       end
 
       # Not for general use.
@@ -121,11 +119,21 @@ module Volt
         @marked_for_destruction.delete_at(index) if index
       end
 
+      # Collection is being notified (probably by super/self)
+      # that a model has been added or removed. Pass
+      # this on to associations.
+      def observe(action, model, caller: nil)
+        friends_only(__method__, caller)
+        debug __method__, __LINE__, "action=#{action} model=#{model} caller=#{caller}"
+        # notify owner model(s) of appended model that it has been added
+        notify_associations(action, model)
+      end
+
       private
 
-      def notify_associations(model, action)
-        associations.each_value do |a|
-          notify_associates(a, model)
+      def notify_associations(action, model)
+        associations.each_value do |assoc|
+          notify_associates(assoc, action, model)
         end
       end
 
@@ -135,17 +143,17 @@ module Volt
       # this collection may be for orders, and
       # association may be owner customer - thus
       # association will be belongs_to
-      def notify_associates(assoc, model)
-        debug __method__, __LINE__, "model=#{model} assoc=#{assoc.inspect} reciprocate=#{assoc.reciprocal.inspect}"
+      def notify_associates(assoc, action, model)
+        debug __method__, __LINE__, "action=#{action} model=#{model} assoc=#{assoc.inspect} reciprocate=#{assoc.reciprocal.inspect}"
         if assoc.reciprocal
           local_id = model.send(assoc.local_id_field)
           debug __method__, __LINE__, "local_id #{assoc.local_id_field}=#{local_id}"
           assoc.foreign_collection.each do |other|
-            debug __method__, __LINE__, "calling #{assoc.foreign_id_field} on #{other}"
+            # debug __method__, __LINE__, "calling #{assoc.foreign_id_field} on #{other}"
             foreign_id = other.send(assoc.foreign_id_field)
             if local_id == foreign_id
-              debug __method__, __LINE__, "foreign_id==local_id of #{other}"
-              other.refresh_association(assoc)
+              debug __method__, __LINE__, "foreign_id==local_id of #{other}, calling other.refresh_association(#{assoc.foreign_name})"
+              other.refresh_association(assoc.reciprocal, caller: self)
             end
           end
         end
@@ -188,6 +196,7 @@ module Volt
         @loaded_ids = []
         debug __method__, __LINE__, "@load_query=#{@load_query}"
         result = (@load_query ? repo_collection.where(@load_query) : repo_collection).all
+        # debug __method__, __LINE__
         @loaded = result.collect{|e|e}.then do |models|
           # debug __method__, __LINE__, "load promise resolved to #{models.size} #{name}"
           models.each do |model|

@@ -17,7 +17,7 @@ module Volt
           foreign_name = assoc.foreign_name
           # create get methods
           model.define_singleton_method(foreign_name) do
-            get_association(assoc)
+            get_association(assoc, caller: self)
           end
           # create set methods
           model.define_singleton_method(setter(foreign_name)) do |model_or_array|
@@ -52,9 +52,9 @@ module Volt
           # (we don't know whether initial request was to
           # self or to collection which holds self)
           unless @marked_for_destruction
-            debug __method__, __LINE__, "marking for destruction"
+            debug __method__, __LINE__, "marking #{self} for destruction"
             @marked_for_destruction = true
-            @collection.mark_model_for_destruction(self)
+            @collection.mark_model_for_destruction(model: self, caller: self)
             mark_associations_for_destruction
           end
         end
@@ -86,16 +86,16 @@ module Volt
         def model.flush!
           if @marked_for_destruction
             # debug __method__, __LINE__, "marked for destruction so call destroy"
-            destroy(caller: self)
+            __destroy(caller: self)
           else
             if new? || dirty?
-              debug __method__, __LINE__
+              # debug __method__, __LINE__
               if new?
                 # debug __method__, __LINE__
                 @collection.repo_collection << self
               else
                 # debug __method__, __LINE__
-                save!(caller: self)
+                __save(caller: self)
               end
             else
               # neither new nor dirty but
@@ -135,20 +135,10 @@ module Volt
           new?
         end
 
-        def model.break_references
+        def model.break_references(caller: nil)
+          Util.friends_only(__method__, caller)
           @associations.clear
           @collection = @associations = nil
-        end
-
-        # Should only be called by the associated foreign RepoCache::Collection.
-        #
-        def model.refresh_association(foreign_association)
-          debug __method__, __LINE__, "foreign_association=#{foreign_association.local_name_plural}"
-          association = @collection.associations[foreign_collection.name]
-          debug __method__, __LINE__, "association=#{association.inspect}"
-          # simply refresh the association query
-          result = get_association(association)
-          debug __method__, __LINE__, "#{self} association=#{association} result=#{result}"
         end
 
         # ######################################
@@ -156,12 +146,19 @@ module Volt
         # Don't call directly. Should be private.
         # ######################################
 
+        # Should only be called by the associated foreign RepoCache::Collection.
+        def model.refresh_association(association, caller: nil)
+          Util.friends_only(__method__, caller)
+          # debug __method__, __LINE__, "association=#{association.foreign_name}"
+          # refresh the association query
+          result = get_association(association, refresh: true, caller: self)
+          # debug __method__, __LINE__, "#{self} association=#{association} result=#{result}"
+        end
+
         # Ensure save! is not being called by anyone else but self.
-        def model.save!(caller: nil)
-          unless caller == self
-            raise RuntimeError, 'use #flush!, cannot save! directly'
-          end
-          super()
+        def model.__save(caller: nil)
+          Util.friends_only(__method__, caller)
+          save!
         end
 
         # Deletes the underlying model the database.
@@ -169,34 +166,36 @@ module Volt
         # if the MESSAGE_BUS is on and there's another connection
         # (e.g. console) running.
         # Returns a promise with destroyed model proxy as value.
-        def model.destroy(caller: nil)
-          debug __method__, __LINE__
-          unless caller == self
-            raise RuntimeError, 'cached models should be marked for destruction, cannot destroy directly'
-          end
+        def model.__destroy(caller: nil)
+          debug __method__, __LINE__, "caller: #{caller}"
+          Util.friends_only(__method__, caller)
           if new?
             Promise.error("cannot delete new model proxy for #{@model.class.name} #{@model.id}")
           else
             debug __method__, __LINE__
-            promise = super()
-            debug __method__, __LINE__, "after real destroy: #{self.class.name} #{id}"
+            promise = destroy
+            debug __method__, __LINE__
             promise.then do |m|
               debug __method__, __LINE__, "destroy promise resolved to #{m}"
-              @collection.remove(self, error_if_absent: true, caller: self)
-              @collection.destroyed(self)
-              break_references
+              @collection.destroyed(self, caller: self)
+              break_references(caller: self)
               self
+            end.fail do |errors|
+              debug __method__, __LINE__, "destroy failed => #{errors}"
+              errors
             end
           end
         end
 
-        def model.get_association(assoc)
+        def model.get_association(assoc, refresh: false, caller: nil)
+          Util.friends_only(__method__, caller)
           foreign_name = assoc.foreign_name
+          @associations[foreign_name] = nil if refresh
           prior = @associations[foreign_name]
           local_id = send(assoc.local_id_field)
-          debug __method__, __LINE__, "assoc=#{assoc.inspect}"
+          # debug __method__, __LINE__, "assoc=#{assoc.inspect}"
           foreign_id_field = assoc.foreign_id_field
-          debug __method__, __LINE__, "foreign_id_field=#{foreign_id_field}"
+          # debug __method__, __LINE__, "foreign_id_field=#{foreign_id_field}"
           result = if prior && match?(prior, foreign_id_field, local_id)
             prior
           else
@@ -219,7 +218,7 @@ module Volt
             # Set the local id to the foreign id
             send(Util.setter(assoc.local_id_field), other.id)
           else
-            prior = get_association(assoc)
+            prior = get_association(assoc, caller: self)
             if assoc.has_one?
               set_one(assoc, other, prior)
             elsif assoc.has_many?
@@ -299,11 +298,11 @@ module Volt
         def model.set_foreign_id(assoc, other)
            validate_ownership(assoc, other, require_foreign_id: false) do |prior_foreign_id|
             # after validation we can be sure prior_foreign_id == self.id
-            debug __method__, __LINE__
+            # debug __method__, __LINE__
             unless prior_foreign_id
               other.send(Util.setter(assoc.foreign_id_field), id)
             end
-            debug __method__, __LINE__
+            # debug __method__, __LINE__
           end
         end
 
@@ -314,9 +313,9 @@ module Volt
         # if it does not match this model's id. Otherwise return true
         # if the foreign id is not nil. Yield to given block if provided.
         def model.validate_ownership(assoc, other, require_foreign_id: true, &block)
-          debug __method__, __LINE__
+          # debug __method__, __LINE__
           check = other.send(assoc.foreign_id_field)
-          debug __method__, __LINE__
+          # debug __method__, __LINE__
           if (check && check != self.id) || (require_foreign_id && check.nil?)
             raise RuntimeError, "#{other} should belong to #{self} or no-one else"
           end
@@ -351,17 +350,19 @@ module Volt
           Promise.when(*promises)
         end
 
-        # Marks all associated models for destruction
+        # Marks all has_one or has_many models for destruction
         def model.mark_associations_for_destruction
           @collection.associations.values.each do |assoc|
-            # debug __method__, __LINE__, "association => '#{association}'"
-            model_or_array = send(assoc.foreign_name)
-            if model_or_array
-              # debug __method__, __LINE__, "model_or_array => '#{model_or_array}'"
-              Util.arrify(model_or_array).each do |model|
-                model.mark_for_destruction!
+            if assoc.has_any?
+              # debug __method__, __LINE__, "association => '#{association}'"
+              model_or_array = send(assoc.foreign_name)
+              if model_or_array
+                # debug __method__, __LINE__, "model_or_array => '#{model_or_array}'"
+                Util.arrify(model_or_array).each do |model|
+                  model.mark_for_destruction!
+                end
+                # debug __method__, __LINE__
               end
-              # debug __method__, __LINE__
             end
           end
         end

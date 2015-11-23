@@ -8,11 +8,15 @@ module Volt
       end
 
       def adder(getter)
-        ('add_' + getter.to_s.singularize).to_sym
+        prefix_method(getter, 'add')
       end
 
       def remover(getter)
-        ('remove_' + getter.to_s.singularize).to_sym
+        prefix_method(getter, 'remove')
+      end
+
+      def prefix_method(getter, prefix)
+        (prefix + '_' + getter.to_s.singularize).to_sym
       end
 
       def arrify(object)
@@ -33,21 +37,29 @@ module Volt
 
       def friends_only(__method__, caller)
         unless friend?(caller)
-          fail "#{self.class.name}##{__method__} for Volt::RepoCache use only"
+          fail "#{self.class.name}##{__method__} for Volt::RepoCache use only, not #{caller.class.name}"
         end
       end
 
       def friend?(object)
-        object ? (object.class.name =~ /^Volt::RepoCache/) == 0 : false
+        if object
+          if object.is_a?(Volt::Model)
+            object.respond_to?(:patched_for_cache?)
+          else
+            (object.class.name =~ /^Volt::RepoCache/) == 0
+          end
+        else
+          false
+        end
       end
 
       def debug(method, line, msg = nil)
         s = ">>> #{self.class.name}##{method}[#{line}] : #{msg}"
-        # if RUBY_PLATFORM == 'opal'
+        if RUBY_PLATFORM == 'opal'
           Volt.logger.debug s
-        # else
-        #  puts s
-        # end
+        else
+          puts s
+        end
       end
 
     end
