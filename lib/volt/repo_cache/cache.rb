@@ -59,7 +59,7 @@ module Volt
         # debug __method__, __LINE__
         @collections.each do |name, collection|
           # debug __method__, __LINE__, "name=#{name} collection=#{collection}"
-          collection.break_references(caller: self)
+          collection.send(:break_references)
         end
         @collections = {}
       end

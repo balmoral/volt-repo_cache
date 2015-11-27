@@ -7,6 +7,10 @@ module Volt
         (getter.to_s + '=').to_sym
       end
 
+      def creator(getter)
+        prefix_method(getter, 'new')
+      end
+
       def adder(getter)
         prefix_method(getter, 'add')
       end

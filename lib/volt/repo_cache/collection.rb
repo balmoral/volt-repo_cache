@@ -7,7 +7,6 @@ module Volt
       include Volt::RepoCache::Util
 
       attr_reader :cache
-      attr_reader :owner
       attr_reader :name
       attr_reader :model_class_name
       attr_reader :model_class
@@ -18,13 +17,12 @@ module Volt
       attr_reader :marked_for_destruction
       attr_reader :associations
 
-      def initialize(cache: nil, owner: nil, name: nil, options: {})
+      def initialize(cache: nil, name: nil, options: {})
         # debug __method__, __LINE__, "name: #{name} options: #{options}"
         super(observer: self)
         @cache = cache
-        @owner = owner
         @name = name
-        @load_query = options[:query]
+        @load_query = options[:query] || options[:where]
         @buffer = !!(options[:buffer] || options[:write])
         @marked_for_destruction = []
         @model_class_name = @name.to_s.singularize.camelize
@@ -34,15 +32,11 @@ module Volt
         load
       end
 
-      def owned?
-        !!@owner
-      end
-
       def buffer?
         @buffer
       end
 
-      alias_method :write?, :buffer?
+      alias_method :write_permission?, :buffer?
 
       # hide circular reference to cache
       def inspect
@@ -70,49 +64,49 @@ module Volt
 
       # Appends a model to the collection.
       # Model may be a hash which will be converted.
+      # (See #induct for more.)
+      # If the model belongs_to any other owners, the foreign id(s)
+      # MUST be already set to ensure associational integrity
+      # in the cache - it is easier to ask the owner for a new
+      # instance (e.g. product.recipe.new_ingredient).
       # Returns the collection (self).
       def append(model, error_if_present: true, error_unless_new: true, result: nil, notify: true)
         model = induct(model, error_unless_new: error_unless_new, error_if_present: error_if_present)
         result[0] = model if result
-        super(model, notify: notify, caller: self)
+        __append__(model, notify: notify)
         self
       end
 
-      # Creates does append with default empty model.
-      # Returns the created model.
-      def create(model = {})
-        result = []
-        append(model, result: result)
-        result[0]
+      def <<(model)
+        append(model)
       end
 
-      def break_references(caller: nil)
-        friends_only(__method__, caller)
-        each {|e| e.break_references(caller: self)}
-        associations.each_value {|e| e.break_references(caller: self)}
+      private
+
+      def break_references
+        each {|e| e.send(:break_references)}
+        associations.each_value {|e| e.send(:break_references)}
         @cache = @associations = @repo_collection = nil
-        clear(caller: self)
-        clear_observers(caller: self)
+        __clear__
       end
 
-      # Add the given model to marked_for_destruction and remove from collection.
-      # This should only be called by RepoCache::Model#mark_for_destruction!.
-      def mark_model_for_destruction(model: model, caller: nil)
-        friends_only(__method__, caller)
+      # Add the given model to marked_for_destruction list
+      # and remove from collection. Should only be called
+      # by RepoCache::Model#mark_for_destruction!.
+      def mark_model_for_destruction(model)
         # don't add if already in marked bucket
         if @marked_for_destruction.detect {|e| e.id == model.id }
           raise RuntimeError, "#{model} already in #{self.name} @marked_for_destruction"
         end
         @marked_for_destruction << model
-        remove(model, error_if_absent: true, caller: self)
+        __remove__(model, error_if_absent: true)
       end
 
-      # Not for general use.
-      # Called by RepoCache::Model#destroy on successful destroy.
-      # Remove model from marked_for_destruction bucket.
+      # Called by RepoCache::Model#destroy on successful
+      # destroy in underlying repository. Remove model
+      # from marked_for_destruction bucket.
       # Don't worry if we can't find it.
-      def destroyed(model, caller: nil)
-        friends_only(__method__, caller)
+      def destroyed(model)
         debug __method__, __LINE__, "getting index of #{model.class.name} #{model.id}"
         index = @marked_for_destruction.index {|e| e.id == model.id }
         debug __method__, __LINE__, "index = #{index}"
@@ -122,14 +116,11 @@ module Volt
       # Collection is being notified (probably by super/self)
       # that a model has been added or removed. Pass
       # this on to associations.
-      def observe(action, model, caller: nil)
-        friends_only(__method__, caller)
-        debug __method__, __LINE__, "action=#{action} model=#{model} caller=#{caller}"
+      def observe(action, model)
+        debug __method__, __LINE__, "action=#{action} model=#{model}"
         # notify owner model(s) of appended model that it has been added
         notify_associations(action, model)
       end
-
-      private
 
       def notify_associations(action, model)
         associations.each_value do |assoc|
@@ -148,28 +139,41 @@ module Volt
         if assoc.reciprocal
           local_id = model.send(assoc.local_id_field)
           debug __method__, __LINE__, "local_id #{assoc.local_id_field}=#{local_id}"
-          assoc.foreign_collection.each do |other|
-            # debug __method__, __LINE__, "calling #{assoc.foreign_id_field} on #{other}"
-            foreign_id = other.send(assoc.foreign_id_field)
-            if local_id == foreign_id
-              debug __method__, __LINE__, "foreign_id==local_id of #{other}, calling other.refresh_association(#{assoc.foreign_name})"
-              other.refresh_association(assoc.reciprocal, caller: self)
+          if local_id # may not be set yet
+            assoc.foreign_collection.each do |other|
+              # debug __method__, __LINE__, "calling #{assoc.foreign_id_field} on #{other}"
+              foreign_id = other.send(assoc.foreign_id_field)
+              if local_id == foreign_id
+                debug __method__, __LINE__, "foreign_id==local_id of #{other}, calling other.refresh_association(#{assoc.foreign_name})"
+                other.send(:refresh_association, assoc.reciprocal)
+              end
             end
           end
         end
         debug __method__, __LINE__
       end
 
-      # Called by #create, #append, #<<.
-      # If the model is a hash then converts it to a new model.
-      # Patches the model with singleton methods and instance variables
-      # required by cached models.
+      # 'Induct' a model into the cache via this collection.
+      #
+      # Called by #append.
+      #
+      # If the model is a hash then converts it to a full model.
+      #
+      # Patches the model with singleton methods and instance
+      # variables required by cached models.
+      #
       # Raises error if:
       # - the model has the wrong persistor for the cache
       # - the model class is not appropriate to this collection
       # - the model is not new and argument error_unless_new is true
-      # - the model is already in collection and argument error_if_present is true
+      # - the model is already in the collection and error_if_present is true
       #
+      # TODO: Also checks the model's associations:
+      # - if it has no belongs_to associations then it is self sufficient
+      #   (owned by no other) and can be added to the collection.
+      # - if it should belong to (an)other model(s), then we require that
+      #   the foreign id(s) are already set, otherwise we cannot ensure
+      #   associational integrity in the cache.
       def induct(model, error_unless_new: true, error_if_present: true)
         model = if model.is_a?(Hash)
           model_class.new(model, options: {persistor: cache.persistor})
@@ -191,7 +195,6 @@ module Volt
         patch_for_cache(model)
       end
 
-      # only to be called by cache
       def load
         @loaded_ids = []
         debug __method__, __LINE__, "@load_query=#{@load_query}"

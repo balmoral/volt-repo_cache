@@ -6,42 +6,12 @@ module Volt
       include Volt::RepoCache::Util
 
       def initialize(observer: nil, contents: [])
-        @observers = [observer]
         @contents = Volt::ReactiveArray.new(contents)
       end
 
-      def add_observer(o, caller: nil)
-        friends_only(__method__, caller)
-        @observers << o unless @observers.detect{|e|e.object_id == o.object_id}
-      end
-
-      def remove_observer(o, caller: nil)
-        friends_only(__method__, caller)
-        i = @observers.find_index{|e|e.object_id == o.object_id}
-        @observers.delete_at(i) if i
-      end
-
-      def clear_observers(caller: nil)
-        friends_only(__method__, caller)
-        @observers = []
-      end
-
-      def delete_at(index, notify: true, caller: nil)
-        friends_only(__method__, caller)
-        model = @contents.delete_at(index)
-        notify_observers(:remove, model) if notify && model
-        model
-      end
-
-      def delete(model, notify: true, caller: nil)
-        friends_only(__method__, caller)
-        i = find_index(model)
-        delete_at(i, caller: caller, notify: notify) if i
-      end
-
-      def clear(caller: nil)
-        friends_only(__method__, caller)
-        @contents.clear
+      # subclasses may override if interested.
+      def observe(action, model)
+        # no op
       end
 
       def index(*args, &block)
@@ -49,7 +19,9 @@ module Volt
       end
 
       def to_a
-        @contents.to_a
+        # not sure what reactive array does
+        # so map contents into normal array
+        @contents.map{|e|e}
       end
 
       def size
@@ -80,15 +52,6 @@ module Volt
         @contents.last
       end
 
-      # Appends an object to the collection.
-      # Returns self.
-      def append(model, notify: true, caller: nil)
-        friends_only(__method__, caller)
-        @contents.append(model)
-        notify_observers(:add, model) if notify
-        self
-      end
-
       def count(&block)
         @contents.count(&block)
       end
@@ -107,14 +70,14 @@ module Volt
 
       alias_method :map, :collect
 
-      def reduce(&block)
-        @contents.reduce(&block)
+      def reduce(seed, &block)
+        @contents.reduce(seed, &block)
       end
 
       alias_method :inject, :reduce
 
       # Query is simple for now:
-      # - a hash keys and values to match by equality
+      # - a hash of keys and values to match by equality
       # - or a select block
       # TODO: would prefer a splat to the hash,
       # but Opal fails to parse calls with **splats
@@ -144,17 +107,31 @@ module Volt
 
       alias_method :where, :query
 
-      # like delete but for internal use
-      def remove_if_present(model, caller: nil)
-        remove(model, error_if_absent: false, caller: caller)
+      private
+
+      def __delete_at__(index, notify: true)
+        model = @contents.delete_at(index)
+        observe(:remove, model) if notify && model
+        model
       end
 
-      # like delete but for internal use
-      def remove(model, error_if_absent: true, caller: nil)
-        friends_only(__method__, caller)
+      def __delete__(model, notify: true)
+        i = find_index(model)
+        __delete_at__(i, notify: notify) if i
+      end
+
+      def __clear__
+        @contents.clear
+      end
+
+      def __remove_if_present__
+        __remove__(model, error_if_absent: false)
+      end
+
+      def __remove__(model, error_if_absent: true)
         index = index {|e| e.id == model.id }
         if index
-          result = delete_at(index, caller: self)
+          result = __delete_at__(index)
           # debug __method__, __LINE__, "deleted #{result.class.name} #{result.id}"
           result
         elsif error_if_absent
@@ -164,18 +141,10 @@ module Volt
         end
       end
 
-      private
-
-      def notify_observers(action, model)
-        debug __method__, __LINE__, "action=#{action} model=#{model} @observers.size=#{@observers.size}"
-        @observers.each do |o|
-          if o.respond_to?(:observe)
-            debug __method__, __LINE__, "calling observer on #{o}"
-            o.observe(action, model, caller: self)
-          else
-            raise RuntimeError, "observer #{o} must respond to :observe"
-          end
-        end
+      def __append__(model, notify: true)
+        @contents.append(model)
+        observe(:add, model) if notify
+        self
       end
 
     end

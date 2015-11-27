@@ -73,11 +73,6 @@ module Volt
         !!reciprocal
       end
 
-      def break_references(caller: nil)
-        friends_only(__method__, caller)
-        @local_collection = @foreign_collection = @reciprocal = nil
-      end
-
       def has_one?
         type == :has_one
       end
@@ -92,6 +87,12 @@ module Volt
 
       def belongs_to?
         type == :belongs_to
+      end
+
+      private
+
+      def break_references
+        @local_collection = @foreign_collection = @reciprocal = nil
       end
 
     end
