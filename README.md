@@ -189,8 +189,7 @@ returns a single promise. Some examples:
 ### Creating new models with no owners
    
 There are two ways to create a new instance of a model
-which will not belong to another model (i.e. it does 
-not have to be associated with an owner).
+not belonging to another model:
  
 #### Example 7 - create a new model (with no owner) via a collection
 
@@ -203,19 +202,17 @@ A new model must be added to the appropriate cached collection
 not be saved to the database until the model or its containing
 collection or cache is flushed.
 
-NB Both `#<<` and `#append` and return the collection, not the
+NB Both `#<<` and `#append` return the collection, not the
 appended model. 
 
-Another way of creating a new model which has no owner is to ask
-the cache directly:
+Another way of creating a new model via a collection using a hash:
  
-#### Example 8 - create a new model (with no owner) via the cache
+#### Example 8 - create a new model (with no owner) via a collection
 
     # create a new product
-    p = cache.add_product(name: 'IJK')
-    
-NB the `#add_product` method returns the new model instance.
-    
+    cache._products << {name: 'IJK'}
+    p = cache._products.where(name: 'IJK')
+        
 ### Creating new models with owners
 
 When creating a new model which belongs to one or more models
@@ -229,13 +226,13 @@ you must set the foreign key id(s) to establish the association(s).
     order = Order.new(product_id: product.id, customer_id: customer.id, quantity: 1, date: Date.today)
     cache._orders << order
   
-An easier way is ask an owner model to create a new owned model.
+An easier way is ask an owner model to create a new owned model:
     
 #### Example 10 - create a new model (with two owners) via an owner model
     
     product = cache._products.where(code: 'XYZ')
-    # ask a customer to create a new order, give it the product id
     customer = cache._customers.where(code: 'ABC')
+    # ask the customer to create a new order, give it the product id
     order = customer.new_order(product_id: product.id, quantity: 1, date: Date.today)
     
 ### Destroying models
@@ -261,6 +258,8 @@ breaking all internal (circular) references.
 
 1. Use associations_data in Volt::Models when 0.9.7 (sql) version available.
 2. Handle non-standard collection, foreign_key and local_key Volt model options. 
+3. Association integrity checks on mark_for_destruction>
+4. 
 3. Test spec.
 4. Locking?
 5. Atomic transactions?
@@ -268,22 +267,19 @@ breaking all internal (circular) references.
 
 ## Contributing and use
 
-This gem was written as part of the development of a production application.
-As it simplifies implementation around asynchronous promise resolution
-in Volt (common to client-side processing in general), we thought it
-might be helpful to other Volt developers.
+This gem was written as part of the development of a production 
+application, primarily to speed up processing requiring many 
+implicit database queries (across associated collections), as well
+as simplifying association management and reducing the burden of
+asynchronous promise resolution.
 
-If nothing else, the implementation here may provide a working (if not perfect) 
-example of promise chaining and collation. If you're still trying to
-get your head around handling promises, take a look at the code here.
-This is the author's attempt at hiding common promise handling around
-database queries and associations in a `DRY` black box. It works well 
-enough for our current application's needs, but it may not scale 
-well - particularly where transactional integrity is paramount.
+It works well enough for our current application's needs, 
+but it may not be suitable for all requirements.
+
 We will look at extending the cache framework to support locking and
 atomic transactions (with rollback), but in the meantime if you have
 a need or interest in this area your suggestions and contributions
-would be welcome.
+are very welcome.
 
 To contribute:
 
