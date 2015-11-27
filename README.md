@@ -259,10 +259,9 @@ breaking all internal (circular) references.
 1. Use associations_data in Volt::Models when 0.9.7 (sql) version available.
 2. Handle non-standard collection, foreign_key and local_key Volt model options. 
 3. Association integrity checks on mark_for_destruction>
-4. 
-3. Test spec.
-4. Locking?
-5. Atomic transactions?
+4. Test spec.
+5. Locking?
+6. Atomic transactions?
 7. Removal of circular references?
 
 ## Contributing and use
