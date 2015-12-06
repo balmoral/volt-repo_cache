@@ -55,10 +55,10 @@ module Volt
           # creator: `model.new_something` method for has_one and has_many
           # will set foreign id in the newly created  model.
           # e.g. recipe = product.new_recipe
-          # e.g. ingredient = product.recipe.new_ingredient(product: flour)
+          # e.g. ingredient = product.recipe.new_ingredient({product: flour})
           if assoc.has_any?
-            model.define_singleton_method(creator(foreign_name), Proc.new { |**args|
-              new_association(assoc, **args)
+            model.define_singleton_method(creator(foreign_name), Proc.new { |args|
+              new_association(assoc, args)
             })
           end
 
@@ -180,11 +180,9 @@ module Volt
         # Assumes fields defined for model.
         # Does not check associations.
         def model.dirty?
-          if buffer?
-            # fields_data is a core Volt class method
-            self.class.fields_data.keys.each do |field|
-              return true if changed?(field)
-            end
+          # fields_data is a core Volt class method
+          self.class.fields_data.keys.each do |field|
+            return true if changed?(field)
           end
           new?
         end
@@ -320,7 +318,7 @@ module Volt
         # Ingredient with `ingredient.recipe_id` set
         # to `recipe.id`, and `recipe.ingredients` will
         # now include the new ingredient.
-        def model.new_association(assoc, **args)
+        def model.new_association(assoc, args)
           other = assoc.foreign_model_class.new(args.merge({
             assoc.foreign_id_field => self.send(assoc.local_id_field)
           }))

@@ -5,7 +5,7 @@
 - Buffers changes to models, collections and associations until flushed.
 - Allows for flushes to be performed at model, collection or cache level.
 - Provides increased associational integrity.
-- Reduces the burden of promise handling in repository (db) operators.
+- Reduces the burden of promise handling in repository (db) operations.
 - Is ideal for use where multiple associated models are being displayed and edited.
 - Preserves standard Volt model and collection interfaces and reactivity.
  
@@ -258,7 +258,7 @@ breaking all internal (circular) references.
 
 1. Use associations_data in Volt::Models when 0.9.7 (sql) version available.
 2. Handle non-standard collection, foreign_key and local_key Volt model options. 
-3. Association integrity checks on mark_for_destruction>
+3. Association integrity checks on mark_for_destruction!
 4. Test spec.
 5. Locking?
 6. Atomic transactions?

@@ -23,7 +23,6 @@ module Volt
         @cache = cache
         @name = name
         @load_query = options[:query] || options[:where]
-        @buffer = !!(options[:buffer] || options[:write])
         @marked_for_destruction = []
         @model_class_name = @name.to_s.singularize.camelize
         @model_class = Object.const_get(@model_class_name)
@@ -31,12 +30,6 @@ module Volt
         init_associations(options)
         load
       end
-
-      def buffer?
-        @buffer
-      end
-
-      alias_method :write_permission?, :buffer?
 
       # hide circular reference to cache
       def inspect
@@ -200,10 +193,11 @@ module Volt
         debug __method__, __LINE__, "@load_query=#{@load_query}"
         result = (@load_query ? repo_collection.where(@load_query) : repo_collection).all
         # debug __method__, __LINE__
+        # loaded is a Promise
         @loaded = result.collect{|e|e}.then do |models|
           # debug __method__, __LINE__, "load promise resolved to #{models.size} #{name}"
           models.each do |model|
-            append(buffer? ? model.buffer : model, error_unless_new: false, notify: false)
+            append(model.buffer, error_unless_new: false, notify: false)
             @loaded_ids << model.id
           end
           self
