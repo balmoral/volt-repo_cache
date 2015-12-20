@@ -5,8 +5,12 @@ module Volt
     class ModelArray
       include Volt::RepoCache::Util
 
-      def initialize(observer: nil, contents: [])
-        @contents = Volt::ReactiveArray.new(contents)
+      def initialize(observer: nil, contents: nil)
+        @contents = Volt::ReactiveArray.new(contents || [])
+        @id_hash = {}
+        @contents.each do |e|
+          @id_hash[e.id] = e
+        end
       end
 
       # subclasses may override if interested.
@@ -90,7 +94,11 @@ module Volt
           end
         elsif args.size == 1
           k, v = args.first
-          select {|e| e.send(k) == v}
+          if k == :id
+            [@id_hash[v]]
+          else
+            select {|e| e.send(k) == v}
+          end
         else
           query do |e|
             match = true
@@ -111,7 +119,10 @@ module Volt
 
       def __delete_at__(index, notify: true)
         model = @contents.delete_at(index)
-        observe(:remove, model) if notify && model
+        if model
+          @id_hash.delete(model.id)
+          observe(:remove, model) if notify
+        end
         model
       end
 
@@ -122,6 +133,7 @@ module Volt
 
       def __clear__
         @contents.clear
+        @id_hash.clear
       end
 
       def __remove_if_present__
@@ -143,6 +155,7 @@ module Volt
 
       def __append__(model, notify: true)
         @contents.append(model)
+        @id_hash[model.id] = model
         observe(:add, model) if notify
         self
       end

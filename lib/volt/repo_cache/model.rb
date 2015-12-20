@@ -45,34 +45,36 @@ module Volt
             get_association(assoc)
           end
 
-          # writer: `model.something=` methods for belongs_to, has_one and has_many
-          # e.g. product.recipe = Recipe.new
-          # e.g. product.recipe.ingredients = [...]
-          model.define_singleton_method(setter(foreign_name)) do |model_or_array|
-            set_association(assoc, model_or_array)
-          end
-
-          # creator: `model.new_something` method for has_one and has_many
-          # will set foreign id in the newly created  model.
-          # e.g. recipe = product.new_recipe
-          # e.g. ingredient = product.recipe.new_ingredient({product: flour})
-          if assoc.has_any?
-            model.define_singleton_method(creator(foreign_name), Proc.new { |args|
-              new_association(assoc, args)
-            })
-          end
-
-          # add and remove has_many association values
-          if assoc.has_many?
-            # add to has_many: `model.add_something`
-            # e.g. product.recipe.add_ingredient(Ingredient.new)
-            model.define_singleton_method(adder(foreign_name)) do |other|
-              add_to_many(assoc, other)
+          unless collection.read_only
+            # writer: `model.something=` methods for belongs_to, has_one and has_many
+            # e.g. product.recipe = Recipe.new
+            # e.g. product.recipe.ingredients = [...]
+            model.define_singleton_method(setter(foreign_name)) do |model_or_array|
+              set_association(assoc, model_or_array)
             end
-            # remove from has_many: `model.remove_something`
-            # e.g. product.recipe.remove_ingredient(ingredient)
-            model.define_singleton_method(remover(foreign_name)) do |other|
-              remove_from_many(assoc, other)
+
+            # creator: `model.new_something` method for has_one and has_many
+            # will set foreign id in the newly created  model.
+            # e.g. recipe = product.new_recipe
+            # e.g. ingredient = product.recipe.new_ingredient({product: flour})
+            if assoc.has_any?
+              model.define_singleton_method(creator(foreign_name), Proc.new { |args|
+                new_association(assoc, args)
+              })
+            end
+
+            # add and remove has_many association values
+            if assoc.has_many?
+              # add to has_many: `model.add_something`
+              # e.g. product.recipe.add_ingredient(Ingredient.new)
+              model.define_singleton_method(adder(foreign_name)) do |other|
+                add_to_many(assoc, other)
+              end
+              # remove from has_many: `model.remove_something`
+              # e.g. product.recipe.remove_ingredient(ingredient)
+              model.define_singleton_method(remover(foreign_name)) do |other|
+                remove_from_many(assoc, other)
+              end
             end
           end
 
@@ -93,21 +95,6 @@ module Volt
           @marked_for_destruction
         end
 
-        # Marks the model and all its 'has_' associations
-        # for destruction when model, collection or cache
-        # is flushed.
-        def model.mark_for_destruction!
-          # prevent collection going in circles on this
-          # (we don't know whether initial request was to
-          # self or to collection which holds self)
-          unless @marked_for_destruction
-            debug __method__, __LINE__, "marking #{self} for destruction"
-            @marked_for_destruction = true
-            @collection.send(:mark_model_for_destruction, self)
-            mark_associations_for_destruction
-          end
-        end
-
         # Returns the cached collected the model belongs to.
         def model.collection
           @collection
@@ -116,52 +103,6 @@ module Volt
         # Returns the cache the model belongs to.
         def model.cache
           @collection.cache
-        end
-
-        # Locks the model in the underlying repo.
-        # Not yet implemented.
-        def model.lock!
-          raise RuntimeError, 'lock support coming'
-        end
-
-        # Flushes changes in the model to the repo.
-        #
-        # - if new will insert (append) the model to the repo
-        #
-        # - if dirty will update (save) the buffer to the repo
-        #
-        # - if new or dirty will flush all has_ associations
-        #
-        # - if marked_for_destruction will destroy the model
-        #   and all its has_one and has_many associations
-        #
-        # Returns a promise with model as value..
-        #
-        # WARNING
-        # - flush! is not (yet) an atomic transaction
-        # - any part of it may fail without unwinding the whole
-        def model.flush!
-          if @marked_for_destruction
-            # debug __method__, __LINE__, "marked for destruction so call destroy"
-            __destroy__
-          else
-            if new? || dirty?
-              # debug __method__, __LINE__
-              if new?
-                # debug __method__, __LINE__
-                @collection.repo_collection << self
-              else
-                # debug __method__, __LINE__
-                __save__
-              end
-            else
-              # neither new nor dirty but
-              # stay in the promise chain
-              Promise.value(self)
-            end
-          end.then do
-            self
-          end
         end
 
         # Hide circular reference to collection
@@ -174,31 +115,97 @@ module Volt
           result
         end
 
-        # Returns true if proxy is buffered and the
-        # buffer has changed from original model.
-        # If proxy is new model return true.
-        # Assumes fields defined for model.
-        # Does not check associations.
-        def model.dirty?
-          # fields_data is a core Volt class method
-          self.class.fields_data.keys.each do |field|
-            return true if changed?(field)
+        unless collection.read_only
+          # Locks the model in the underlying repo.
+          # Not yet implemented.
+          def model.lock!
+            raise RuntimeError, 'lock support coming'
           end
-          new?
-        end
 
-        def destroy(caller: nil)
-          unless caller.object_id == self.object_id
-            raise RuntimeError, "cached model should be marked for destruction - cannot destroy directly"
+          # Marks the model and all its 'has_' associations
+          # for destruction when model, collection or cache
+          # is flushed.
+          def model.mark_for_destruction!
+            # prevent collection going in circles on this
+            # (we don't know whether initial request was to
+            # self or to collection which holds self)
+            unless @marked_for_destruction
+              debug __method__, __LINE__, "marking #{self} for destruction"
+              @marked_for_destruction = true
+              @collection.send(:mark_model_for_destruction, self)
+              mark_associations_for_destruction
+            end
           end
-          super()
-        end
 
-        def save!(caller: nil)
-          unless caller.object_id == self.object_id
-            raise RuntimeError, "cached model should be flushed - cannot save directly"
+          # Flushes changes in the model to the repo.
+          #
+          # - if new will insert (append) the model to the repo
+          #
+          # - if dirty will update (save) the buffer to the repo
+          #
+          # - if new or dirty will flush all has_ associations
+          #
+          # - if marked_for_destruction will destroy the model
+          #   and all its has_one and has_many associations
+          #
+          # Returns a promise with model as value..
+          #
+          # WARNING
+          # - flush! is not (yet) an atomic transaction
+          # - any part of it may fail without unwinding the whole
+          def model.flush!
+            fail_if_read_only(__method__)
+            if @marked_for_destruction
+              # debug __method__, __LINE__, "marked for destruction so call destroy"
+              __destroy__
+            else
+              if new? || dirty?
+                # debug __method__, __LINE__
+                if new?
+                  # debug __method__, __LINE__
+                  @collection.repo_collection << self
+                else
+                  # debug __method__, __LINE__
+                  __save__
+                end
+              else
+                # neither new nor dirty but
+                # stay in the promise chain
+                Promise.value(self)
+              end
+            end.then do
+              self
+            end
           end
-          super()
+
+          # Returns true if proxy is buffered and the
+          # buffer has changed from original model.
+          # If proxy is new model return true.
+          # Assumes fields defined for model.
+          # Does not check associations.
+          def model.dirty?
+            # fields_data is a core Volt class method
+            self.class.fields_data.keys.each do |field|
+              return true if changed?(field)
+            end
+            new?
+          end
+
+          def destroy(caller: nil)
+            fail_if_read_only(__method__)
+            unless caller.object_id == self.object_id
+              raise RuntimeError, "cached model should be marked for destruction - cannot destroy directly"
+            end
+            super()
+          end
+
+          def save!(caller: nil)
+            fail_if_read_only(__method__)
+            unless caller.object_id == self.object_id
+              raise RuntimeError, "cached model should be flushed - cannot save directly"
+            end
+            super()
+          end
         end
 
         # #######################################
@@ -207,9 +214,16 @@ module Volt
         # class namespace is Volt::RepoCache.
         # #######################################
 
+        def model.fail_if_read_only(what)
+          if @collection.read_only
+            raise RuntimeError, "cannot #{what} for read only cache collection/model"
+          end
+        end
+        model.singleton_class.send(:private, :fail_if_read_only)
+
         # private
         def model.break_references
-          @associations.clear
+          @associations.clear if @associations
           @collection = @associations = nil
         end
         model.singleton_class.send(:private, :break_references)
@@ -242,6 +256,7 @@ module Volt
         # Returns a promise with destroyed model proxy as value.
         def model.__destroy__
           debug __method__, __LINE__
+          fail_if_read_only(what)
           if new?
             Promise.error("cannot delete new model proxy for #{@model.class.name} #{@model.id}")
           else
@@ -273,19 +288,19 @@ module Volt
         # Relies on cached collections notifying
         # associated models when to refresh.
         def model.get_association(assoc, refresh: false)
+          # debug __method__, __LINE__, "#{self.class.name}:#{id} assoc=#{assoc.foreign_name} refresh: #{refresh}"
           foreign_name = assoc.foreign_name
           @associations[foreign_name] = nil if refresh
           prior = @associations[foreign_name]
           local_id = self.send(assoc.local_id_field)
-          # debug __method__, __LINE__, "assoc=#{assoc.inspect}"
           foreign_id_field = assoc.foreign_id_field
           # debug __method__, __LINE__, "foreign_id_field=#{foreign_id_field}"
           result = if prior && match?(prior, foreign_id_field, local_id)
             prior
           else
             q = {foreign_id_field => local_id}
-            result = assoc.foreign_collection.query(q) || []
-            @associations[foreign_name] = assoc.has_many? ? ModelArray.new(contents: result) : result.first
+            r = assoc.foreign_collection.query(q) || []
+            @associations[foreign_name] = assoc.has_many? ? ModelArray.new(contents: r) : r.first
           end
           result
         end
@@ -319,6 +334,7 @@ module Volt
         # to `recipe.id`, and `recipe.ingredients` will
         # now include the new ingredient.
         def model.new_association(assoc, args)
+          fail_if_read_only(what)
           other = assoc.foreign_model_class.new(args.merge({
             assoc.foreign_id_field => self.send(assoc.local_id_field)
           }))
@@ -377,6 +393,7 @@ module Volt
 
         # private
         def model.set_one(assoc, other, prior)
+          fail_if_read_only(what)
           validate_foreign_class(assoc, other)
           # the prior is no longer required
           prior.mark_for_destruction! if prior
@@ -391,6 +408,7 @@ module Volt
 
         # private
         def model.set_many(assoc, new_values, prior_values)
+          fail_if_read_only(what)
           unless new_values.respond_to?(:to_a)
             raise RuntimeError, "value for setting has_many #{assoc.foreign_name} must respond to :to_a"
           end
@@ -421,6 +439,7 @@ module Volt
         # Will raise an exception if the new association
         # is not new or is not the appropriate class.
         def model.add_to_many(assoc, other)
+          fail_if_read_only(what)
           set_foreign_id(assoc, other)
           assoc.foreign_collection.append(other, error_if_present: false)
         end
@@ -443,6 +462,7 @@ module Volt
         # foreign_id is already set and not this model's
         # (i.e. if the associate belongs to another model).
         def model.set_foreign_id(assoc, other)
+          fail_if_read_only(what)
           validate_ownership(assoc, other, require_foreign_id: false) do |prior_foreign_id|
             # after validation we can be sure prior_foreign_id == self.id
             # debug __method__, __LINE__
@@ -462,6 +482,7 @@ module Volt
         # set_association method to do the rest, including notification
         # of owner/reciprocal association.
         def model.trapped_set_owner_id(assoc, new_owner_id)
+          fail_if_read_only(what)
           new_value = assoc.foreign_collection.detect do |e|
             e.id == new_owner_id
           end
@@ -543,6 +564,7 @@ module Volt
         # private
         # Marks all has_one or has_many models for destruction
         def model.mark_associations_for_destruction
+          fail_if_read_only(what)
           @collection.associations.values.each do |assoc|
             if assoc.has_any?
               # debug __method__, __LINE__, "association => '#{association}'"

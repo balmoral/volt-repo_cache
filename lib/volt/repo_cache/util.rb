@@ -66,6 +66,13 @@ module Volt
         end
       end
 
+      def time(method, line, msg = nil)
+        t1 = Time.now
+        r = yield
+        t2 = Time.now
+        debug(method, line, "#{msg} : took #{t2 - t1} seconds")
+        r
+      end
     end
   end
 end

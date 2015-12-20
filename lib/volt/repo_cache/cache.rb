@@ -82,12 +82,17 @@ module Volt
         @options.each do |given_name, options|
           name = collection_name(given_name)
           debug __method__, __LINE__
-          collection = Collection.new(cache: self, name: name, options: options)
+          collection = time(__method__, __LINE__, "create collection #{name}") {
+            Collection.new(cache: self, name: name, options: options)
+          }
           debug __method__, __LINE__
           @collections[name] = collection
           promises << collection.loaded
         end
-        @loaded = Promise.when(*promises).then { self }
+        debug __method__, __LINE__, "promises.size = #{promises.size}"
+        @loaded = Promise.when(*promises).then do
+          self
+        end
         debug __method__, __LINE__, "@loaded => #{@loaded.class.name}:#{@loaded.value.class.name}"
       end
 

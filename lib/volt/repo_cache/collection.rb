@@ -16,6 +16,7 @@ module Volt
       attr_reader :loaded # Promise
       attr_reader :marked_for_destruction
       attr_reader :associations
+      attr_reader :read_only
 
       def initialize(cache: nil, name: nil, options: {})
         # debug __method__, __LINE__, "name: #{name} options: #{options}"
@@ -23,6 +24,7 @@ module Volt
         @cache = cache
         @name = name
         @load_query = options[:query] || options[:where]
+        @read_only = options[:read_only].nil? ? true : options[:read_only]
         @marked_for_destruction = []
         @model_class_name = @name.to_s.singularize.camelize
         @model_class = Object.const_get(@model_class_name)
@@ -45,11 +47,14 @@ module Volt
       # element promises are resolved.
       # TODO: error handling
       def flush!
-        # debug __method__, __LINE__
-        promises = @marked_for_destruction.map {|e| e.flush! }
-        # debug __method__, __LINE__, "after destruction flushes promises => #{promises}"
-        promises = promises + map {|e| e.flush! }
-        # debug __method__, __LINE__, "after upsert flushes: promises => #{promises}"
+        promises = []
+        unless read_only
+          # debug __method__, __LINE__
+          promises = @marked_for_destruction.map {|e| e.flush! }
+          # debug __method__, __LINE__, "after destruction flushes promises => #{promises}"
+          promises = promises + map {|e| e.flush! }
+          # debug __method__, __LINE__, "after upsert flushes: promises => #{promises}"
+        end
         result = Promise.when(*promises)
         # debug __method__, __LINE__, "after Promise.when: result => #{result}"
         result
@@ -76,10 +81,17 @@ module Volt
 
       private
 
+      def fail_if_read_only(what)
+        if read_only
+          raise RuntimeError, "cannot #{what} for read only cache collection"
+        end
+      end
+
       def break_references
         each {|e| e.send(:break_references)}
         associations.each_value {|e| e.send(:break_references)}
-        @cache = @associations = @repo_collection = nil
+        @id_table.clear if @id_table
+        @cache = @associations = @repo_collection = @id_table = nil
         __clear__
       end
 
@@ -87,6 +99,7 @@ module Volt
       # and remove from collection. Should only be called
       # by RepoCache::Model#mark_for_destruction!.
       def mark_model_for_destruction(model)
+        fail_if_read_only(__method__)
         # don't add if already in marked bucket
         if @marked_for_destruction.detect {|e| e.id == model.id }
           raise RuntimeError, "#{model} already in #{self.name} @marked_for_destruction"
@@ -189,15 +202,13 @@ module Volt
       end
 
       def load
-        @loaded_ids = []
-        debug __method__, __LINE__, "@load_query=#{@load_query}"
-        result = (@load_query ? repo_collection.where(@load_query) : repo_collection).all
         # debug __method__, __LINE__
-        # loaded is a Promise
-        @loaded = result.collect{|e|e}.then do |models|
+        @loaded_ids = []
+        q = @load_query ? repo_collection.where(@load_query) : repo_collection
+        @loaded = q.all.collect{|e|e}.then do |models|
           # debug __method__, __LINE__, "load promise resolved to #{models.size} #{name}"
           models.each do |model|
-            append(model.buffer, error_unless_new: false, notify: false)
+            append(read_only ? model : model.buffer, error_unless_new: false, notify: false)
             @loaded_ids << model.id
           end
           self
@@ -206,10 +217,12 @@ module Volt
       end
 
       def init_associations(options)
-        @associations = {}
-        [:belongs_to, :has_one, :has_many].each do |type|
-          arrify(options[type]).map(&:to_sym).each do |foreign_name|
-            @associations[foreign_name] = Association.new(self, foreign_name, type)
+        time(__method__, __LINE__) do
+          @associations = {}
+          [:belongs_to, :has_one, :has_many].each do |type|
+            arrify(options[type]).map(&:to_sym).each do |foreign_name|
+              @associations[foreign_name] = Association.new(self, foreign_name, type)
+            end
           end
         end
       end
