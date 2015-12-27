@@ -31,10 +31,14 @@ module Volt
       # Call #flush! to flush all changes to the repo.
       # Call #clear when finished with the cache to help
       # garbage collection.
-      def initialize(repo: nil, **options)
-        @repo = repo || Volt.current_app.store
-        @options = options
+      #
+      # TODO:
+      # read_only should be inherited by has_... targets
+      #
+      def initialize(**options)
         debug __method__, __LINE__, "@options = #{@options}"
+        @repo = options.delete(:repo) || Volt.current_app.store
+        @collection_options = options.delete(:collections) || {}
         load
       end
 
@@ -79,18 +83,19 @@ module Volt
       def load
         @collections = {}
         promises = []
-        @options.each do |given_name, options|
+        @collection_options.each do |given_name, options|
           name = collection_name(given_name)
           debug __method__, __LINE__
-          collection = time(__method__, __LINE__, "create collection #{name}") {
-            Collection.new(cache: self, name: name, options: options)
-          }
-          debug __method__, __LINE__
+          collection = Collection.new(cache: self, name: name, options: options)
+          # debug __method__, __LINE__
           @collections[name] = collection
           promises << collection.loaded
         end
         debug __method__, __LINE__, "promises.size = #{promises.size}"
+        t1 = Time.now
         @loaded = Promise.when(*promises).then do
+          t2 = Time.now
+          debug __method__, __LINE__, "@@loaded = Promise.when(*promises).then took #{t2-t1} seconds"
           self
         end
         debug __method__, __LINE__, "@loaded => #{@loaded.class.name}:#{@loaded.value.class.name}"

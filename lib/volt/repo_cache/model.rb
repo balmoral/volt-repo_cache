@@ -256,7 +256,7 @@ module Volt
         # Returns a promise with destroyed model proxy as value.
         def model.__destroy__
           debug __method__, __LINE__
-          fail_if_read_only(what)
+          fail_if_read_only(__method__)
           if new?
             Promise.error("cannot delete new model proxy for #{@model.class.name} #{@model.id}")
           else
@@ -334,7 +334,7 @@ module Volt
         # to `recipe.id`, and `recipe.ingredients` will
         # now include the new ingredient.
         def model.new_association(assoc, args)
-          fail_if_read_only(what)
+          fail_if_read_only(__method__)
           other = assoc.foreign_model_class.new(args.merge({
             assoc.foreign_id_field => self.send(assoc.local_id_field)
           }))
@@ -393,7 +393,7 @@ module Volt
 
         # private
         def model.set_one(assoc, other, prior)
-          fail_if_read_only(what)
+          fail_if_read_only(__method__)
           validate_foreign_class(assoc, other)
           # the prior is no longer required
           prior.mark_for_destruction! if prior
@@ -408,7 +408,7 @@ module Volt
 
         # private
         def model.set_many(assoc, new_values, prior_values)
-          fail_if_read_only(what)
+          fail_if_read_only(__method__)
           unless new_values.respond_to?(:to_a)
             raise RuntimeError, "value for setting has_many #{assoc.foreign_name} must respond to :to_a"
           end
@@ -439,7 +439,7 @@ module Volt
         # Will raise an exception if the new association
         # is not new or is not the appropriate class.
         def model.add_to_many(assoc, other)
-          fail_if_read_only(what)
+          fail_if_read_only(__method__)
           set_foreign_id(assoc, other)
           assoc.foreign_collection.append(other, error_if_present: false)
         end
@@ -462,7 +462,7 @@ module Volt
         # foreign_id is already set and not this model's
         # (i.e. if the associate belongs to another model).
         def model.set_foreign_id(assoc, other)
-          fail_if_read_only(what)
+          fail_if_read_only(__method__)
           validate_ownership(assoc, other, require_foreign_id: false) do |prior_foreign_id|
             # after validation we can be sure prior_foreign_id == self.id
             # debug __method__, __LINE__
@@ -482,7 +482,7 @@ module Volt
         # set_association method to do the rest, including notification
         # of owner/reciprocal association.
         def model.trapped_set_owner_id(assoc, new_owner_id)
-          fail_if_read_only(what)
+          fail_if_read_only(__method__)
           new_value = assoc.foreign_collection.detect do |e|
             e.id == new_owner_id
           end
@@ -564,7 +564,7 @@ module Volt
         # private
         # Marks all has_one or has_many models for destruction
         def model.mark_associations_for_destruction
-          fail_if_read_only(what)
+          fail_if_read_only(__method__)
           @collection.associations.values.each do |assoc|
             if assoc.has_any?
               # debug __method__, __LINE__, "association => '#{association}'"

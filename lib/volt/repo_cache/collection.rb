@@ -1,3 +1,4 @@
+require 'set'
 require 'volt/reactive/reactive_array'
 
 # TODO: find a way around circular reference from collections to cache
@@ -21,16 +22,22 @@ module Volt
       def initialize(cache: nil, name: nil, options: {})
         # debug __method__, __LINE__, "name: #{name} options: #{options}"
         super(observer: self)
+        debug __method__, __LINE__
         @cache = cache
         @name = name
+        debug __method__, __LINE__
         @load_query = options[:query] || options[:where]
         @read_only = options[:read_only].nil? ? true : options[:read_only]
-        @marked_for_destruction = []
+        debug __method__, __LINE__
+        @marked_for_destruction = {}
         @model_class_name = @name.to_s.singularize.camelize
         @model_class = Object.const_get(@model_class_name)
         @repo_collection = @cache.repo.send(name)
+        debug __method__, __LINE__
         init_associations(options)
+        debug __method__, __LINE__
         load
+        debug __method__, __LINE__
       end
 
       # hide circular reference to cache
@@ -49,15 +56,14 @@ module Volt
       def flush!
         promises = []
         unless read_only
-          # debug __method__, __LINE__
-          promises = @marked_for_destruction.map {|e| e.flush! }
-          # debug __method__, __LINE__, "after destruction flushes promises => #{promises}"
-          promises = promises + map {|e| e.flush! }
-          # debug __method__, __LINE__, "after upsert flushes: promises => #{promises}"
+          @marked_for_destruction.each_value do |e|
+            promises << e.flush!
+          end
+          each do |e|
+            promises << e.flush!
+          end
         end
-        result = Promise.when(*promises)
-        # debug __method__, __LINE__, "after Promise.when: result => #{result}"
-        result
+        Promise.when(*promises)
       end
 
       # Appends a model to the collection.
@@ -101,10 +107,10 @@ module Volt
       def mark_model_for_destruction(model)
         fail_if_read_only(__method__)
         # don't add if already in marked bucket
-        if @marked_for_destruction.detect {|e| e.id == model.id }
+        if @marked_for_destruction[model.id]
           raise RuntimeError, "#{model} already in #{self.name} @marked_for_destruction"
         end
-        @marked_for_destruction << model
+        @marked_for_destruction[model.id] = model
         __remove__(model, error_if_absent: true)
       end
 
@@ -113,17 +119,15 @@ module Volt
       # from marked_for_destruction bucket.
       # Don't worry if we can't find it.
       def destroyed(model)
-        debug __method__, __LINE__, "getting index of #{model.class.name} #{model.id}"
-        index = @marked_for_destruction.index {|e| e.id == model.id }
-        debug __method__, __LINE__, "index = #{index}"
-        @marked_for_destruction.delete_at(index) if index
+        @loaded_ids.delete(model.id)
+        @marked_for_destruction.delete(model.id)
       end
 
       # Collection is being notified (probably by super/self)
       # that a model has been added or removed. Pass
       # this on to associations.
       def observe(action, model)
-        debug __method__, __LINE__, "action=#{action} model=#{model}"
+        # debug __method__, __LINE__, "action=#{action} model=#{model}"
         # notify owner model(s) of appended model that it has been added
         notify_associations(action, model)
       end
@@ -141,22 +145,22 @@ module Volt
       # association may be owner customer - thus
       # association will be belongs_to
       def notify_associates(assoc, action, model)
-        debug __method__, __LINE__, "action=#{action} model=#{model} assoc=#{assoc.inspect} reciprocate=#{assoc.reciprocal.inspect}"
+        # debug __method__, __LINE__, "action=#{action} model=#{model} assoc=#{assoc.inspect} reciprocate=#{assoc.reciprocal.inspect}"
         if assoc.reciprocal
           local_id = model.send(assoc.local_id_field)
-          debug __method__, __LINE__, "local_id #{assoc.local_id_field}=#{local_id}"
+          # debug __method__, __LINE__, "local_id #{assoc.local_id_field}=#{local_id}"
           if local_id # may not be set yet
             assoc.foreign_collection.each do |other|
               # debug __method__, __LINE__, "calling #{assoc.foreign_id_field} on #{other}"
               foreign_id = other.send(assoc.foreign_id_field)
               if local_id == foreign_id
-                debug __method__, __LINE__, "foreign_id==local_id of #{other}, calling other.refresh_association(#{assoc.foreign_name})"
+                # debug __method__, __LINE__, "foreign_id==local_id of #{other}, calling other.refresh_association(#{assoc.foreign_name})"
                 other.send(:refresh_association, assoc.reciprocal)
               end
             end
           end
         end
-        debug __method__, __LINE__
+        # debug __method__, __LINE__
       end
 
       # 'Induct' a model into the cache via this collection.
@@ -193,36 +197,39 @@ module Volt
           if error_unless_new && !model.new?
             raise ArgumentError, "#{model} must be new"
           end
-          if error_if_present && detect {|e| e.id == model.id}
+          if error_if_present && @loaded_ids.include?(model.id)
             raise RuntimeError, "cannot add #{model} already in cached collection"
           end
           model
         end
+        @loaded_ids << model.id
         patch_for_cache(model)
       end
 
       def load
         # debug __method__, __LINE__
-        @loaded_ids = []
+        @loaded_ids = Set.new  # append/delete will update
         q = @load_query ? repo_collection.where(@load_query) : repo_collection
+        # t1 = Time.now
         @loaded = q.all.collect{|e|e}.then do |models|
-          # debug __method__, __LINE__, "load promise resolved to #{models.size} #{name}"
+          # t2 = Time.now
+          # debug __method__, __LINE__, "#{name} read_only=#{read_only} query promise resolved to #{models.size} models in #{t2-t1} seconds"
           models.each do |model|
             append(read_only ? model : model.buffer, error_unless_new: false, notify: false)
-            @loaded_ids << model.id
           end
+          # t3 = Time.now
+          # debug __method__, __LINE__, "#{name} loaded ids for #{models.size} #{name} in #{t3-t2} seconds"
           self
         end
-        debug __method__, __LINE__, "@loaded => #{@loaded.class.name}:#{@loaded.value.class.name}"
+        # debug __method__, __LINE__, "@loaded => #{@loaded.class.name}:#{@loaded.value.class.name}"
       end
 
       def init_associations(options)
-        time(__method__, __LINE__) do
-          @associations = {}
-          [:belongs_to, :has_one, :has_many].each do |type|
-            arrify(options[type]).map(&:to_sym).each do |foreign_name|
-              @associations[foreign_name] = Association.new(self, foreign_name, type)
-            end
+        debug __method__, __LINE__
+        @associations = {}
+        [:belongs_to, :has_one, :has_many].each do |type|
+          arrify(options[type]).map(&:to_sym).each do |foreign_name|
+            @associations[foreign_name] = Association.new(self, foreign_name, type)
           end
         end
       end
