@@ -10,6 +10,8 @@ module Volt
       extend Volt::RepoCache::Util
 
       def self.patch_for_cache(model, collection)
+        # Volt sets @new to false if any attribute changes - not what we want
+        model.instance_variable_set(:@new_when_cached, model.new?)
         model.instance_variable_set(:@collection, collection)
         model.instance_variable_set(:@associations, {})
         model.instance_variable_set(:@marked_for_destruction, false)
@@ -89,6 +91,10 @@ module Volt
           true
         end
 
+        def model.new_when_cached?
+          @new_when_cached
+        end
+
         # Returns true if the model has been marked
         # for destruction on flush. Otherwise false.
         def model.marked_for_destruction?
@@ -159,13 +165,13 @@ module Volt
               # debug __method__, __LINE__, "marked for destruction so call destroy"
               __destroy__
             else
-              if new? || dirty?
+              if new_when_cached? || dirty?
                 # debug __method__, __LINE__
-                if new?
-                  # debug __method__, __LINE__
+                if new_when_cached?
+                  debug __method__, __LINE__, "new: #{self.class.name}::#{self.id}"
                   @collection.repo_collection << self
                 else
-                  # debug __method__, __LINE__
+                  debug __method__, __LINE__,"dirty: #{self.class.name}::#{self.id}"
                   __save__
                 end
               else
@@ -188,23 +194,40 @@ module Volt
             self.class.fields_data.keys.each do |field|
               return true if changed?(field)
             end
-            new?
+            new_when_cached?
           end
 
-          def destroy(caller: nil)
+          # Destroys (deletes) the model in database.
+          # If not called by the model itself
+          # the model is marked for destruction and flushed
+          # to ensure cache integrity, otherwise super() called.
+          # Returns a promise.
+          def model.destroy(caller: nil)
             fail_if_read_only(__method__)
-            unless caller.object_id == self.object_id
-              raise RuntimeError, "cached model should be marked for destruction - cannot destroy directly"
+            if caller.nil?
+              mark_for_destruction!
+              flush!
+            elsif caller.object_id != self.object_id
+              raise RuntimeError, "#{__method__}: unexpected caller #{caller}"
+            else
+              super()
             end
-            super()
           end
 
-          def save!(caller: nil)
+          # Saves (creates/updates) the model in database.
+          # If not called by the model itself
+          # the model is flushed (to ensure cache
+          # integrity, otherwise super() called.
+          # Returns a promise.
+          def model.save!(caller: nil)
             fail_if_read_only(__method__)
-            unless caller.object_id == self.object_id
-              raise RuntimeError, "cached model should be flushed - cannot save directly"
+            if caller.nil?
+              flush!
+            elsif caller.object_id != self.object_id
+              raise RuntimeError, "#{__method__}: unexpected caller #{caller}"
+            else
+              super()
             end
-            super()
           end
         end
 
@@ -257,7 +280,7 @@ module Volt
         def model.__destroy__
           debug __method__, __LINE__
           fail_if_read_only(__method__)
-          if new?
+          if new_when_cached?
             Promise.error("cannot delete new model proxy for #{@model.class.name} #{@model.id}")
           else
             debug __method__, __LINE__
@@ -335,12 +358,14 @@ module Volt
         # now include the new ingredient.
         def model.new_association(assoc, args)
           fail_if_read_only(__method__)
-          other = assoc.foreign_model_class.new(args.merge({
+          other = assoc.foreign_model_class.new((args || {}).merge({
             assoc.foreign_id_field => self.send(assoc.local_id_field)
           }))
           if assoc.has_one?
+            debug __method__, __LINE__, "new_association(#{assoc.foreign_model_class} new?=#{other.new?} has_one => #{other.to_h}"
             set_association(assoc, other)
           else
+            debug __method__, __LINE__, "new_association(#{assoc.foreign_model_class} new?=#{other.new?} has_many => #{other.to_h}"
             add_to_many(assoc, other)
           end
           other

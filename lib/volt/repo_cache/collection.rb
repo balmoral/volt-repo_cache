@@ -22,22 +22,18 @@ module Volt
       def initialize(cache: nil, name: nil, options: {})
         # debug __method__, __LINE__, "name: #{name} options: #{options}"
         super(observer: self)
-        debug __method__, __LINE__
+        # debug __method__, __LINE__
         @cache = cache
         @name = name
-        debug __method__, __LINE__
         @load_query = options[:query] || options[:where]
         @read_only = options[:read_only].nil? ? true : options[:read_only]
-        debug __method__, __LINE__
         @marked_for_destruction = {}
         @model_class_name = @name.to_s.singularize.camelize
         @model_class = Object.const_get(@model_class_name)
         @repo_collection = @cache.repo.send(name)
-        debug __method__, __LINE__
         init_associations(options)
-        debug __method__, __LINE__
         load
-        debug __method__, __LINE__
+        # debug __method__, __LINE__
       end
 
       # hide circular reference to cache
@@ -64,6 +60,14 @@ module Volt
           end
         end
         Promise.when(*promises)
+      end
+
+      # Create a new model from given hash and append it to the collection.
+      # Returns the new model
+      def create(hash)
+        result = []
+        append(hash, result: result)
+        result[0]
       end
 
       # Appends a model to the collection.
@@ -225,7 +229,7 @@ module Volt
       end
 
       def init_associations(options)
-        debug __method__, __LINE__
+        # debug __method__, __LINE__
         @associations = {}
         [:belongs_to, :has_one, :has_many].each do |type|
           arrify(options[type]).map(&:to_sym).each do |foreign_name|
