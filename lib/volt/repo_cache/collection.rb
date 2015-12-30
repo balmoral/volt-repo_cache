@@ -65,6 +65,7 @@ module Volt
       # Create a new model from given hash and append it to the collection.
       # Returns the new model
       def create(hash)
+        # debug __method__, __LINE__
         result = []
         append(hash, result: result)
         result[0]
