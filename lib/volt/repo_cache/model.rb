@@ -165,11 +165,13 @@ module Volt
               # debug __method__, __LINE__, "marked for destruction so call destroy"
               __destroy__
             else
-              if new_when_cached? || dirty?
+              if @new_when_cached || dirty?
                 # debug __method__, __LINE__
                 if new_when_cached?
                   debug __method__, __LINE__, "new: #{self.class.name}::#{self.id}"
-                  @collection.repo_collection << self
+                  @collection.repo_collection << self.class.new(to_h)
+                  clear_tracked_changes! # in Volt
+                  @new_when_cached = false
                 else
                   debug __method__, __LINE__,"dirty: #{self.class.name}::#{self.id}"
                   __save__
