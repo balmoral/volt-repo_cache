@@ -81,6 +81,10 @@ module Volt
       private
 
       def load
+        debug __method__, __LINE__, "calling @repo.persistor.clear_identity_map "
+        # ensure we've got a clean load ??
+        @repo.persistor.clear_identity_map # otherwise error if new customer add via repo_cache
+
         @collections = {}
         promises = []
         @collection_options.each do |given_name, options|
