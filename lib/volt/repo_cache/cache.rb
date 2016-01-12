@@ -63,9 +63,14 @@ module Volt
         # debug __method__, __LINE__
         @collections.each do |name, collection|
           # debug __method__, __LINE__, "name=#{name} collection=#{collection}"
-          collection.send(:break_references)
+          collection.send(:uncache)
         end
         @collections = {}
+
+        # TODO: this is not nice, but bad things happen if we don't clear the repo persistor's identity map
+        # -> ensure we don't leave patched models lying around
+        # debug __method__, __LINE__, "calling @repo.persistor.clear_identity_map "
+        # @repo.persistor.clear_identity_map # otherwise error if new customer add via repo_cache
       end
 
       # Flush all cached collections and in turn
@@ -81,10 +86,6 @@ module Volt
       private
 
       def load
-        debug __method__, __LINE__, "calling @repo.persistor.clear_identity_map "
-        # ensure we've got a clean load ??
-        @repo.persistor.clear_identity_map # otherwise error if new customer add via repo_cache
-
         @collections = {}
         promises = []
         @collection_options.each do |given_name, options|

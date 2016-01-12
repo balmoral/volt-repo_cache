@@ -60,6 +60,10 @@ module Volt
         @contents.count(&block)
       end
 
+      def sort(&block)
+        @contents.sort(&block)
+      end
+
       def select(&block)
         @contents.select(&block)
       end

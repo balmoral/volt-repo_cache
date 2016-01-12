@@ -9,13 +9,14 @@ module Volt
     module Model
       extend Volt::RepoCache::Util
 
-      def self.patch_for_cache(model, collection)
-        # Volt sets @new to false if any attribute changes - not what we want
-        model.instance_variable_set(:@new_when_cached, model.new?)
-        model.instance_variable_set(:@collection, collection)
-        model.instance_variable_set(:@associations, {})
-        model.instance_variable_set(:@marked_for_destruction, false)
+      def self.patch_for_cache(model, collection, created_in_cache)
+        # debug __method__, __LINE__, "patch_for_cache [#{collection.name}] : #{model.to_h}"
 
+        # Volt sets @new to false if any attribute changes - not what we want
+        model.instance_variable_set(:@__cache__created_in_cache, created_in_cache)
+        model.instance_variable_set(:@__cache__collection, collection)
+        model.instance_variable_set(:@__cache__associations, {})
+        model.instance_variable_set(:@__cache__marked_for_destruction, false)
         # TODO: if model is not buffered, then trap all
         # field set value methods and raise exception -
         # unless buffered the model is read only.
@@ -36,14 +37,17 @@ module Volt
             # - validates the local id is in the foreign cached collection
             # - notifies associated models as required
             # NB this overrides a model's foreign_id set methods
-            model.define_singleton_method(setter(assoc.local_id_field)) do |new_foreign_id|
+            m = setter(assoc.local_id_field)
+            model.define_singleton_method(m) do |new_foreign_id|
               trapped_set_owner_id(assoc, new_foreign_id)
             end
           end
 
           # reader: `model.something` method for belongs_to, has_one and has_many
           # e.g. product.recipe
-          model.define_singleton_method(foreign_name) do
+          m = foreign_name
+          model.define_singleton_method(m) do
+            # debug __method__, __LINE__, "defining #{model.class.name}##{m}"
             get_association(assoc)
           end
 
@@ -51,7 +55,8 @@ module Volt
             # writer: `model.something=` methods for belongs_to, has_one and has_many
             # e.g. product.recipe = Recipe.new
             # e.g. product.recipe.ingredients = [...]
-            model.define_singleton_method(setter(foreign_name)) do |model_or_array|
+            m = setter(foreign_name)
+            model.define_singleton_method(m) do |model_or_array|
               set_association(assoc, model_or_array)
             end
 
@@ -60,7 +65,8 @@ module Volt
             # e.g. recipe = product.new_recipe
             # e.g. ingredient = product.recipe.new_ingredient({product: flour})
             if assoc.has_any?
-              model.define_singleton_method(creator(foreign_name), Proc.new { |args|
+              m = creator(foreign_name)
+              model.define_singleton_method(m, Proc.new { |args|
                 new_association(assoc, args)
               })
             end
@@ -69,12 +75,14 @@ module Volt
             if assoc.has_many?
               # add to has_many: `model.add_something`
               # e.g. product.recipe.add_ingredient(Ingredient.new)
-              model.define_singleton_method(adder(foreign_name)) do |other|
+              m = adder(foreign_name)
+              model.define_singleton_method(m) do |other|
                 add_to_many(assoc, other)
               end
               # remove from has_many: `model.remove_something`
               # e.g. product.recipe.remove_ingredient(ingredient)
-              model.define_singleton_method(remover(foreign_name)) do |other|
+              m = remover(foreign_name)
+              model.define_singleton_method(m) do |other|
                 remove_from_many(assoc, other)
               end
             end
@@ -91,34 +99,38 @@ module Volt
           true
         end
 
-        def model.new_when_cached?
-          @new_when_cached
+        def model.created_in_cache?
+          @__cache__created_in_cache
         end
 
         # Returns true if the model has been marked
         # for destruction on flush. Otherwise false.
         def model.marked_for_destruction?
-          @marked_for_destruction
+          @__cache__marked_for_destruction
         end
 
         # Returns the cached collected the model belongs to.
         def model.collection
-          @collection
+          @__cache__collection
         end
 
         # Returns the cache the model belongs to.
         def model.cache
-          @collection.cache
+          @__cache__collection.cache
         end
 
         # Hide circular reference to collection
         # when doing inspection.
         def model.inspect
-          __tmp = @collection
-          @collection = "{{#{@collection.name}}}"
-          result = super
-          @collection = __tmp
-          result
+          if @__cache__collection
+            __tmp = @__cache__collection
+            @__cache__collection = "{{#{@__cache__collection.name}}}"
+            result = super
+            @__cache__collection = __tmp
+            result
+          else
+            super
+          end
         end
 
         unless collection.read_only
@@ -135,10 +147,10 @@ module Volt
             # prevent collection going in circles on this
             # (we don't know whether initial request was to
             # self or to collection which holds self)
-            unless @marked_for_destruction
+            unless @__cache__marked_for_destruction
               debug __method__, __LINE__, "marking #{self} for destruction"
-              @marked_for_destruction = true
-              @collection.send(:mark_model_for_destruction, self)
+              @__cache__marked_for_destruction = true
+              @__cache__collection.send(:mark_model_for_destruction, self)
               mark_associations_for_destruction
             end
           end
@@ -161,17 +173,16 @@ module Volt
           # - any part of it may fail without unwinding the whole
           def model.flush!
             fail_if_read_only(__method__)
-            if @marked_for_destruction
+            if @__cache__marked_for_destruction
               # debug __method__, __LINE__, "marked for destruction so call destroy"
               __destroy__
             else
-              if @new_when_cached || dirty?
+              if @__cache__created_in_cache || dirty?
                 # debug __method__, __LINE__
-                if new_when_cached?
+                if @__cache__created_in_cache
                   debug __method__, __LINE__, "new: #{self.class.name}::#{self.id}"
-                  @collection.repo_collection << self.class.new(to_h)
-                  clear_tracked_changes! # in Volt
-                  @new_when_cached = false
+                  @__cache__collection.repo_collection << self
+                  @__cache__created_in_cache = false
                 else
                   debug __method__, __LINE__,"dirty: #{self.class.name}::#{self.id}"
                   __save__
@@ -196,7 +207,7 @@ module Volt
             self.class.fields_data.keys.each do |field|
               return true if changed?(field)
             end
-            new_when_cached?
+            @__cache__created_in_cache
           end
 
           # Destroys (deletes) the model in database.
@@ -240,18 +251,48 @@ module Volt
         # #######################################
 
         def model.fail_if_read_only(what)
-          if @collection.read_only
+          if @__cache__collection.read_only
             raise RuntimeError, "cannot #{what} for read only cache collection/model"
           end
         end
         model.singleton_class.send(:private, :fail_if_read_only)
 
         # private
-        def model.break_references
-          @associations.clear if @associations
-          @collection = @associations = nil
+        def model.uncache
+          @__cache__associations.clear if @__cache__associations
+          if false
+            instance_variables.each do |v|
+              if v.to_s =~ /__cache__/
+                # debug __method__, __LINE__, "removing instance variable '#{v}'"
+                set_instance_varirable(v, nil)
+              end
+            end
+          elsif false
+            @__cache__associations.clear if @__cache__associations
+            instance_variables.each do |v|
+              if v.to_s =~ /__cache__/
+                # debug __method__, __LINE__, "removing instance variable '#{v}'"
+                remove_instance_variable(v)
+              end
+            end
+            # WARNING - assumes no singleton methods other than those we've attached
+            singleton_methods.each do |m|
+              unless m == :debug || m == :uncache
+                # debug __method__, __LINE__, "removing singleton method '#{m}'"
+                @@___m___ = m # m is out of scope in class << self TODO: anything nicer?
+                class << self # weird syntax to remove singleton method
+                  remove_method(@@___m___)
+                end
+              end
+            end
+            @@___m___ = nil
+            class << self
+              remove_method(:debug)
+              remove_method(:uncache)
+            end
+          end
         end
-        model.singleton_class.send(:private, :break_references)
+        model.singleton_class.send(:private, :uncache)
 
         # private
         # Used by cached collections to notify
@@ -282,21 +323,21 @@ module Volt
         def model.__destroy__
           debug __method__, __LINE__
           fail_if_read_only(__method__)
-          if new_when_cached?
-            Promise.error("cannot delete new model proxy for #{@model.class.name} #{@model.id}")
+          debug __method__, __LINE__
+          promise = if created_in_cache? || new?
+            Promise.value(self)
           else
-            debug __method__, __LINE__
-            promise = destroy(caller: self)
-            debug __method__, __LINE__
-            promise.then do |m|
-              debug __method__, __LINE__, "destroy promise resolved to #{m}"
-              @collection.destroyed(self)
-              break_references
-              self
-            end.fail do |errors|
-              debug __method__, __LINE__, "destroy failed => #{errors}"
-              errors
-            end
+            destroy(caller: self)
+          end
+          debug __method__, __LINE__
+          promise.then do |m|
+            debug __method__, __LINE__, "destroy promise resolved to #{m}"
+            @__cache__collection.destroyed(self)
+            uncache
+            self
+          end.fail do |errors|
+            debug __method__, __LINE__, "destroy failed => #{errors}"
+            errors
           end
         end
         model.singleton_class.send(:private, :__destroy__)
@@ -315,8 +356,8 @@ module Volt
         def model.get_association(assoc, refresh: false)
           # debug __method__, __LINE__, "#{self.class.name}:#{id} assoc=#{assoc.foreign_name} refresh: #{refresh}"
           foreign_name = assoc.foreign_name
-          @associations[foreign_name] = nil if refresh
-          prior = @associations[foreign_name]
+          @__cache__associations[foreign_name] = nil if refresh
+          prior = @__cache__associations[foreign_name]
           local_id = self.send(assoc.local_id_field)
           foreign_id_field = assoc.foreign_id_field
           # debug __method__, __LINE__, "foreign_id_field=#{foreign_id_field}"
@@ -324,9 +365,12 @@ module Volt
             prior
           else
             q = {foreign_id_field => local_id}
+            # debug __method__, __LINE__
             r = assoc.foreign_collection.query(q) || []
-            @associations[foreign_name] = assoc.has_many? ? ModelArray.new(contents: r) : r.first
+            # debug __method__, __LINE__
+            @__cache__associations[foreign_name] = assoc.has_many? ? ModelArray.new(contents: r) : r.first
           end
+          # debug __method__, __LINE__
           result
         end
         model.singleton_class.send(:private, :get_association)
@@ -358,25 +402,24 @@ module Volt
         # Ingredient with `ingredient.recipe_id` set
         # to `recipe.id`, and `recipe.ingredients` will
         # now include the new ingredient.
-        def model.new_association(assoc, args)
+        def model.new_association(assoc, _attrs)
           fail_if_read_only(__method__)
-          other = assoc.foreign_model_class.new((args || {}).merge({
-            assoc.foreign_id_field => self.send(assoc.local_id_field)
-          }))
+          # go through the foreign collection to create
+          attrs = _attrs ? _attrs.dup : {}
+          attrs[assoc.foreign_id_field] = self.send(assoc.local_id_field)
+          new_associate = assoc.foreign_collection.create(attrs)
           if assoc.has_one?
-            debug __method__, __LINE__, "new_association(#{assoc.foreign_model_class} new?=#{other.new?} has_one => #{other.to_h}"
-            set_association(assoc, other)
+            set_association(assoc, new_associate, false)
           else
-            debug __method__, __LINE__, "new_association(#{assoc.foreign_model_class} new?=#{other.new?} has_many => #{other.to_h}"
-            add_to_many(assoc, other)
+            add_to_many(assoc, new_associate, false)
           end
-          other
+          new_associate
         end
         model.singleton_class.send(:private, :new_association)
 
 
         # private
-        # Set the associated value for the give belongs_to,
+        # Set the associated value for the given belongs_to,
         # has_one or has_many association,
         #
         # e.g. has_one: `product.recipe = Recipe.new`
@@ -390,13 +433,13 @@ module Volt
         # has_many then any prior associated values
         # will be marked for destruction.
         #
-        # NB we don't immediately update local @associations,
+        # NB we don't immediately update local @__cache__associations,
         # but wait to be notified by associated collections
         # of changes we make to them. This ensures that
         # if changes are made to those collections that
         # have not gone through this method, that everything
         # is still in sync.
-        def model.set_association(assoc, value)
+        def model.set_association(assoc, value, append = true)
           if assoc.belongs_to?
             prior = send(assoc.local_id_field)
             if prior
@@ -408,9 +451,9 @@ module Volt
           else
             prior = get_association(assoc)
             if assoc.has_one?
-              set_one(assoc, value, prior)
+              set_one(assoc, value, prior, append)
             elsif assoc.has_many?
-              set_many(assoc, value, prior)
+              set_many(assoc, value, prior, append)
             else
               raise RuntimeError, "set_association cannot handle #{assoc.inspect}"
             end
@@ -419,7 +462,7 @@ module Volt
         model.singleton_class.send(:private, :set_association)
 
         # private
-        def model.set_one(assoc, other, prior)
+        def model.set_one(assoc, other, prior, append = true)
           fail_if_read_only(__method__)
           validate_foreign_class(assoc, other)
           # the prior is no longer required
@@ -428,13 +471,13 @@ module Volt
           set_foreign_id(assoc, other)
           # Add to cache if not already there, which will raise an exception
           # if the new_Value is not new or is not the appropriate class.
-          assoc.foreign_collection.append(other, error_if_present: false)
+          assoc.foreign_collection.append(other, error_if_present: false) if append
           other
         end
         model.singleton_class.send(:private, :set_one)
 
         # private
-        def model.set_many(assoc, new_values, prior_values)
+        def model.set_many(assoc, new_values, prior_values, append = true)
           fail_if_read_only(__method__)
           unless new_values.respond_to?(:to_a)
             raise RuntimeError, "value for setting has_many #{assoc.foreign_name} must respond to :to_a"
@@ -456,7 +499,7 @@ module Volt
           # handle case where new value is in
           # prior values
           new_values.each do |new_value|
-            add_to_many(new_value)
+            add_to_many(new_value, append)
           end
         end
         model.singleton_class.send(:private, :set_many)
@@ -465,10 +508,10 @@ module Volt
         # Add model to has_many association if not already there.
         # Will raise an exception if the new association
         # is not new or is not the appropriate class.
-        def model.add_to_many(assoc, other)
+        def model.add_to_many(assoc, other, append)
           fail_if_read_only(__method__)
           set_foreign_id(assoc, other)
-          assoc.foreign_collection.append(other, error_if_present: false)
+          assoc.foreign_collection.append(other, error_if_present: false) if append
         end
         model.singleton_class.send(:private, :add_to_many)
 
@@ -573,7 +616,7 @@ module Volt
         # from flushing associates.
         def model.flush_associations
           promises = []
-          @collection.associations.values.each do |assoc|
+          @__cache__collection.associations.values.each do |assoc|
             if assoc.has_any?
               # debug __method__, __LINE__, "association => '#{association}'"
               model_or_array = send(assoc.foreign_name)
@@ -592,7 +635,7 @@ module Volt
         # Marks all has_one or has_many models for destruction
         def model.mark_associations_for_destruction
           fail_if_read_only(__method__)
-          @collection.associations.values.each do |assoc|
+          @__cache__collection.associations.values.each do |assoc|
             if assoc.has_any?
               # debug __method__, __LINE__, "association => '#{association}'"
               model_or_array = send(assoc.foreign_name)
@@ -623,3 +666,5 @@ module Volt
     end
   end
 end
+
+

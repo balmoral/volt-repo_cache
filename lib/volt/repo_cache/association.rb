@@ -91,7 +91,7 @@ module Volt
 
       private
 
-      def break_references
+      def uncache
         @local_collection = @foreign_collection = @reciprocal = nil
       end
 

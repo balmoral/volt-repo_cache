@@ -52,7 +52,9 @@ module Volt
       def flush!
         promises = []
         unless read_only
-          @marked_for_destruction.each_value do |e|
+          # models are removed from @marked_from_destruction as
+          # they are flushed, so we need a copy of them to enumerate
+          @marked_for_destruction.values.dup.each do |e|
             promises << e.flush!
           end
           each do |e|
@@ -64,11 +66,8 @@ module Volt
 
       # Create a new model from given hash and append it to the collection.
       # Returns the new model
-      def create(hash)
-        # debug __method__, __LINE__
-        result = []
-        append(hash, result: result)
-        result[0]
+      def create(hash = {})
+        append(hash.to_h)
       end
 
       # Appends a model to the collection.
@@ -78,16 +77,17 @@ module Volt
       # MUST be already set to ensure associational integrity
       # in the cache - it is easier to ask the owner for a new
       # instance (e.g. product.recipe.new_ingredient).
-      # Returns the collection (self).
-      def append(model, error_if_present: true, error_unless_new: true, result: nil, notify: true)
+      # NB: Returns the newly appended model.
+      def append(model, error_if_present: true, error_unless_new: true,  notify: true)
         model = induct(model, error_unless_new: error_unless_new, error_if_present: error_if_present)
-        result[0] = model if result
         __append__(model, notify: notify)
-        self
+        model
       end
 
+      # Returns self after appending the given model
       def <<(model)
         append(model)
+        self
       end
 
       private
@@ -98,9 +98,9 @@ module Volt
         end
       end
 
-      def break_references
-        each {|e| e.send(:break_references)}
-        associations.each_value {|e| e.send(:break_references)}
+      def uncache
+        each {|e| e.send(:uncache)}
+        associations.each_value {|e| e.send(:uncache)}
         @id_table.clear if @id_table
         @cache = @associations = @repo_collection = @id_table = nil
         __clear__
@@ -119,9 +119,8 @@ module Volt
         __remove__(model, error_if_absent: true)
       end
 
-      # Called by RepoCache::Model#destroy on successful
-      # destroy in underlying repository. Remove model
-      # from marked_for_destruction bucket.
+      # Called by RepoCache::Model#__destroy__.
+      # Remove model from marked_for_destruction bucket.
       # Don't worry if we can't find it.
       def destroyed(model)
         @loaded_ids.delete(model.id)
@@ -132,14 +131,17 @@ module Volt
       # that a model has been added or removed. Pass
       # this on to associations.
       def observe(action, model)
-        # debug __method__, __LINE__, "action=#{action} model=#{model}"
+        debug __method__, __LINE__, "action=#{action} model=#{model} associations=#{associations}"
         # notify owner model(s) of appended model that it has been added
         notify_associations(action, model)
       end
 
       def notify_associations(action, model)
+        debug __method__, __LINE__, "action=#{action} model=#{model} associations=#{associations}"
         associations.each_value do |assoc|
+          debug __method__, __LINE__, "calling notify_associates(#{assoc}, #{action}, #{model})"
           notify_associates(assoc, action, model)
+          debug __method__, __LINE__, "called notify_associates(#{assoc}, #{action}, #{model})"
         end
       end
 
@@ -150,7 +152,7 @@ module Volt
       # association may be owner customer - thus
       # association will be belongs_to
       def notify_associates(assoc, action, model)
-        # debug __method__, __LINE__, "action=#{action} model=#{model} assoc=#{assoc.inspect} reciprocate=#{assoc.reciprocal.inspect}"
+        # debug __method__, __LINE__, "action=#{action} model=#{model} assoc=#{assoc} reciprocate=#{assoc.reciprocal}"
         if assoc.reciprocal
           local_id = model.send(assoc.local_id_field)
           # debug __method__, __LINE__, "local_id #{assoc.local_id_field}=#{local_id}"
@@ -189,26 +191,31 @@ module Volt
       # - if it should belong to (an)other model(s), then we require that
       #   the foreign id(s) are already set, otherwise we cannot ensure
       #   associational integrity in the cache.
-      def induct(model, error_unless_new: true, error_if_present: true)
-        model = if model.is_a?(Hash)
-          model_class.new(model, options: {persistor: cache.persistor})
+      #
+      # Returns the inducted model.
+      def induct(model_or_hash, error_unless_new: true, error_if_present: true)
+        created_in_cache = false
+        if model_or_hash.is_a?(Hash)
+          created_in_cache = true
+          model = model_class.new(model_or_hash, options: {persistor: cache.persistor})
         else
+          model = model_or_hash
           # unless model.persistor.class == cache.persistor.class
           #   raise RuntimeError, "model persistor is #{model.persistor} but should be #{cache.persistor}"
           # end
           unless model.class == model_class
             raise ArgumentError, "#{model} must be a #{model_class_name}"
           end
-          if error_unless_new && !model.new?
-            raise ArgumentError, "#{model} must be new"
+          if error_unless_new && (!model.created_in_cache? || model.new?)
+            raise ArgumentError, "#{model} must be new (not stored) or have been created in cache"
           end
           if error_if_present && @loaded_ids.include?(model.id)
             raise RuntimeError, "cannot add #{model} already in cached collection"
           end
-          model
         end
         @loaded_ids << model.id
-        patch_for_cache(model)
+        patch_for_cache(model, created_in_cache)
+        model
       end
 
       def load
@@ -230,18 +237,19 @@ module Volt
       end
 
       def init_associations(options)
-        # debug __method__, __LINE__
+        # debug __method__, __LINE__, "options = #{options}"
         @associations = {}
         [:belongs_to, :has_one, :has_many].each do |type|
           arrify(options[type]).map(&:to_sym).each do |foreign_name|
             @associations[foreign_name] = Association.new(self, foreign_name, type)
+            # debug __method__, __LINE__, "@associations[#{foreign_name}] = #{@associations[foreign_name].inspect}"
           end
         end
       end
 
-      def patch_for_cache(model)
+      def patch_for_cache(model, created_in_cache)
         unless model.respond_to?(:patched_for_cache?)
-          RepoCache::Model.patch_for_cache(model, self)
+          RepoCache::Model.patch_for_cache(model, self, created_in_cache)
         end
         model
       end
