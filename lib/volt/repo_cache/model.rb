@@ -148,7 +148,7 @@ module Volt
             # (we don't know whether initial request was to
             # self or to collection which holds self)
             unless @__cache__marked_for_destruction
-              debug __method__, __LINE__, "marking #{self} for destruction"
+              # debug __method__, __LINE__, "marking #{self} for destruction"
               @__cache__marked_for_destruction = true
               @__cache__collection.send(:mark_model_for_destruction, self)
               mark_associations_for_destruction
@@ -174,20 +174,21 @@ module Volt
           def model.flush!
             fail_if_read_only(__method__)
             if @__cache__marked_for_destruction
-              # debug __method__, __LINE__, "marked for destruction so call destroy"
+              # debug __method__, __LINE__, "marked for destruction so call destroy on #{to_h}"
               __destroy__
             else
               if @__cache__created_in_cache || dirty?
-                # debug __method__, __LINE__
+                # debug __method__, __LINE__, "is dirty: #{to_h}"
                 if @__cache__created_in_cache
-                  debug __method__, __LINE__, "new: #{self.class.name}::#{self.id}"
-                  @__cache__collection.repo_collection << self
+                  # debug __method__, __LINE__, "new: #{self.class.name}::#{self.id}"
                   @__cache__created_in_cache = false
+                  @__cache__collection.repo_collection << self
                 else
-                  debug __method__, __LINE__,"dirty: #{self.class.name}::#{self.id}"
+                  # debug __method__, __LINE__,"dirty: #{self.class.name}::#{self.id}"
                   __save__
                 end
               else
+                # debug __method__, __LINE__, "not dirty: #{to_h}"
                 # neither new nor dirty but
                 # stay in the promise chain
                 Promise.value(self)
@@ -321,22 +322,22 @@ module Volt
         # (e.g. console) running.
         # Returns a promise with destroyed model proxy as value.
         def model.__destroy__
-          debug __method__, __LINE__
+          # debug __method__, __LINE__
           fail_if_read_only(__method__)
-          debug __method__, __LINE__
+          # debug __method__, __LINE__
           promise = if created_in_cache? || new?
             Promise.value(self)
           else
             destroy(caller: self)
           end
-          debug __method__, __LINE__
+          # debug __method__, __LINE__
           promise.then do |m|
-            debug __method__, __LINE__, "destroy promise resolved to #{m}"
+            # debug __method__, __LINE__, "destroy promise resolved to #{m}"
             @__cache__collection.destroyed(self)
             uncache
             self
           end.fail do |errors|
-            debug __method__, __LINE__, "destroy failed => #{errors}"
+            # debug __method__, __LINE__, "destroy failed => #{errors}"
             errors
           end
         end

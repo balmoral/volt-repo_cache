@@ -4,7 +4,7 @@ module Volt
       module_function
 
       def setter(getter)
-        (getter.to_s + '=').to_sym
+        :"#{getter}="
       end
 
       def creator(getter)
@@ -20,7 +20,7 @@ module Volt
       end
 
       def prefix_method(getter, prefix)
-        (prefix + '_' + getter.to_s.singularize).to_sym
+        :"#{prefix}_#{getter.to_s.singularize}"
       end
 
       def arrify(object)

@@ -18,9 +18,9 @@ module Volt
         @type = type
         @foreign_model_class_name = @foreign_name.to_s.singularize.camelize
         @foreign_model_class = Object.const_get(@foreign_model_class_name)
-        @foreign_collection_name = ('_' + @foreign_name.to_s.pluralize).to_sym
-        @foreign_id_field = has_any? ? (@local_collection.model_class_name.underscore + '_id').to_sym : :id
-        @local_id_field = belongs_to? ? (@foreign_name.to_s + '_id').to_sym : :id
+        @foreign_collection_name = :"_#{@foreign_name.to_s.pluralize}"
+        @foreign_id_field = has_any? ? :"#{@local_collection.model_class_name.underscore}_id" : :id
+        @local_id_field = belongs_to? ? :"#{@foreign_name.to_s}_id" : :id
       end
 
       # Hide circular references to local

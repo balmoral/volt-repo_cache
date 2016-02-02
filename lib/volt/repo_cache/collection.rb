@@ -131,17 +131,17 @@ module Volt
       # that a model has been added or removed. Pass
       # this on to associations.
       def observe(action, model)
-        debug __method__, __LINE__, "action=#{action} model=#{model} associations=#{associations}"
+        # debug __method__, __LINE__, "action=#{action} model=#{model} associations=#{associations}"
         # notify owner model(s) of appended model that it has been added
         notify_associations(action, model)
       end
 
       def notify_associations(action, model)
-        debug __method__, __LINE__, "action=#{action} model=#{model} associations=#{associations}"
+        # debug __method__, __LINE__, "action=#{action} model=#{model} associations=#{associations}"
         associations.each_value do |assoc|
-          debug __method__, __LINE__, "calling notify_associates(#{assoc}, #{action}, #{model})"
+          # debug __method__, __LINE__, "calling notify_associates(#{assoc}, #{action}, #{model})"
           notify_associates(assoc, action, model)
-          debug __method__, __LINE__, "called notify_associates(#{assoc}, #{action}, #{model})"
+          # debug __method__, __LINE__, "called notify_associates(#{assoc}, #{action}, #{model})"
         end
       end
 
