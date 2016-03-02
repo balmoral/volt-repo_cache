@@ -265,7 +265,7 @@ module Volt
             instance_variables.each do |v|
               if v.to_s =~ /__cache__/
                 # debug __method__, __LINE__, "removing instance variable '#{v}'"
-                set_instance_varirable(v, nil)
+                set_instance_variable(v, nil)
               end
             end
           elsif false
