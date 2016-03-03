@@ -5,12 +5,21 @@ module Volt
     class ModelArray
       include Volt::RepoCache::Util
 
+      # for benefit of Volt::Watch
+      def self.reactive_array?
+        true
+      end
+
       def initialize(observer: nil, contents: nil)
         @contents = Volt::ReactiveArray.new(contents || [])
         @id_hash = {}
         @contents.each do |e|
           @id_hash[e.id] = e
         end
+      end
+
+      def reactive_array?
+        self.class.reactive_array?
       end
 
       # subclasses may override if interested.
@@ -32,8 +41,12 @@ module Volt
         @contents.size
       end
 
+      def [](index)
+        @contents[index]
+      end
+
       def empty?
-        @contents.empty?
+        @contents.empty
       end
 
       def detect(*args, &block)
