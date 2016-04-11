@@ -57,12 +57,32 @@ module Volt
         end
       end
 
-      def debug(method, line, msg = nil)
-        s = ">>> #{self.class.name}##{method}[#{line}] : #{msg}"
-        if RUBY_PLATFORM == 'opal'
-          Volt.logger.debug s
-        else
-          puts s
+      def debug_level=(l)
+        @debug_level = l
+      end
+
+      def debug_level
+        @debug_level ||= 0
+      end
+
+      def debug_method_missing=(v)
+        @debug_method_missing = v
+      end
+
+      def debug_method_missing?
+        !!@debug_method_missing
+      end
+
+      def debug(level, proc)
+        if level == 0 || level <= debug_level
+          file, line, method, msg = proc.call
+          s = "#{file}[#{line}] #{self.is_a?(Class) ? (self.name + '#') : self.class.name}##{method}"
+          s = s + " >> #{msg}" if msg
+          if RUBY_PLATFORM == 'opal'
+            `console.log(s)`
+          else
+            puts s
+          end
         end
       end
 
