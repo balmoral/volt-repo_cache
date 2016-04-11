@@ -57,40 +57,11 @@ module Volt
         end
       end
 
-      def debug_level=(l)
-        @debug_level = l
-      end
-
-      def debug_level
-        @debug_level ||= 0
-      end
-
-      def debug_method_missing=(v)
-        @debug_method_missing = v
-      end
-
-      def debug_method_missing?
-        !!@debug_method_missing
-      end
-
-      def debug(level, proc)
-        if level == 0 || level <= debug_level
-          file, line, method, msg = proc.call
-          s = "#{file}[#{line}] #{self.is_a?(Class) ? (self.name + '#') : self.class.name}##{method}"
-          s = s + " >> #{msg}" if msg
-          if RUBY_PLATFORM == 'opal'
-            `console.log(s)`
-          else
-            puts s
-          end
-        end
-      end
-
       def time(method, line, msg = nil)
         t1 = Time.now
         r = yield
         t2 = Time.now
-        debug(method, line, "#{msg} : took #{t2 - t1} seconds")
+        debug 1, ->{['nil file', line, method, "#{msg} : took #{t2 - t1} seconds"]}
         r
       end
     end

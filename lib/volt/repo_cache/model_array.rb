@@ -160,12 +160,9 @@ module Volt
       def __remove__(model, error_if_absent: true)
         index = index {|e| e.id == model.id }
         if index
-          result = __delete_at__(index)
-          # debug __method__, __LINE__, "deleted #{result.class.name} #{result.id}"
-          result
+          __delete_at__(index)
         elsif error_if_absent
           msg = "could not find #{model.class.name} with id #{model.id} to delete"
-          # debug __method__, __LINE__, msg
           raise RuntimeError, msg
         end
       end

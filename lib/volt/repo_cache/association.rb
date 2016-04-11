@@ -58,13 +58,10 @@ module Volt
       # foreign_collection being lazily initialized.
       def reciprocal
         unless @reciprocal
-          # debug __method__, __LINE__, ""
           @reciprocal = foreign_collection.associations.values.detect do |a|
-            # debug __method__, __LINE__, "#{a.foreign_collection.name} ?==? #{local_collection.name}"
             a.foreign_collection.name == local_collection.name
           end
           @reciprocal = :nil unless @reciprocal
-          # debug __method__, __LINE__, "reciprocal of #{self.inspect} is #{@reciprocal.inspect}"
         end
         @reciprocal == :nil ? nil : @reciprocal
       end

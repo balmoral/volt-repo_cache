@@ -10,7 +10,7 @@ module Volt
       extend Volt::RepoCache::Util
 
       def self.patch_for_cache(model, collection, created_in_cache)
-        # debug __method__, __LINE__, "patch_for_cache [#{collection.name}] : #{model.to_h}"
+        # debug_model __method__, __LINE__, "patch_for_cache [#{collection.name}] : #{model.to_h}"
 
         # Volt sets @new to false if any attribute changes - not what we want
         model.instance_variable_set(:@__cache__created_in_cache, created_in_cache)
@@ -47,7 +47,7 @@ module Volt
           # e.g. product.recipe
           m = foreign_name
           model.define_singleton_method(m) do
-            # debug __method__, __LINE__, "defining #{model.class.name}##{m}"
+            # debug_model __method__, __LINE__, "defining #{model.class.name}##{m}"
             get_association(assoc)
           end
 
@@ -148,7 +148,7 @@ module Volt
             # (we don't know whether initial request was to
             # self or to collection which holds self)
             unless @__cache__marked_for_destruction
-              # debug __method__, __LINE__, "marking #{self} for destruction"
+              # debug_model __method__, __LINE__, "marking #{self} for destruction"
               @__cache__marked_for_destruction = true
               @__cache__collection.send(:mark_model_for_destruction, self)
               mark_associations_for_destruction
@@ -174,21 +174,21 @@ module Volt
           def model.flush!
             fail_if_read_only(__method__)
             if @__cache__marked_for_destruction
-              # debug __method__, __LINE__, "marked for destruction so call destroy on #{to_h}"
+              # debug_model __method__, __LINE__, "marked for destruction so call destroy on #{to_h}"
               __destroy__
             else
               if @__cache__created_in_cache || dirty?
-                # debug __method__, __LINE__, "is dirty: #{to_h}"
+                # debug_model __method__, __LINE__, "is dirty: #{to_h}"
                 if @__cache__created_in_cache
-                  # debug __method__, __LINE__, "new: #{self.class.name}::#{self.id}"
+                  # debug_model __method__, __LINE__, "new: #{self.class.name}::#{self.id}"
                   @__cache__created_in_cache = false
                   @__cache__collection.repo_collection << self
                 else
-                  # debug __method__, __LINE__,"dirty: #{self.class.name}::#{self.id}"
+                  # debug_model __method__, __LINE__,"dirty: #{self.class.name}::#{self.id}"
                   __save__
                 end
               else
-                # debug __method__, __LINE__, "not dirty: #{to_h}"
+                # debug_model __method__, __LINE__, "not dirty: #{to_h}"
                 # neither new nor dirty but
                 # stay in the promise chain
                 Promise.value(self)
@@ -264,7 +264,7 @@ module Volt
           if false
             instance_variables.each do |v|
               if v.to_s =~ /__cache__/
-                # debug __method__, __LINE__, "removing instance variable '#{v}'"
+                # debug_model __method__, __LINE__, "removing instance variable '#{v}'"
                 set_instance_variable(v, nil)
               end
             end
@@ -272,14 +272,14 @@ module Volt
             @__cache__associations.clear if @__cache__associations
             instance_variables.each do |v|
               if v.to_s =~ /__cache__/
-                # debug __method__, __LINE__, "removing instance variable '#{v}'"
+                # debug_model __method__, __LINE__, "removing instance variable '#{v}'"
                 remove_instance_variable(v)
               end
             end
             # WARNING - assumes no singleton methods other than those we've attached
             singleton_methods.each do |m|
-              unless m == :debug || m == :uncache
-                # debug __method__, __LINE__, "removing singleton method '#{m}'"
+              unless m == :debug_model || m == :uncache
+                # debug_model __method__, __LINE__, "removing singleton method '#{m}'"
                 @@___m___ = m # m is out of scope in class << self TODO: anything nicer?
                 class << self # weird syntax to remove singleton method
                   remove_method(@@___m___)
@@ -288,7 +288,7 @@ module Volt
             end
             @@___m___ = nil
             class << self
-              remove_method(:debug)
+              remove_method(:debug_model)
               remove_method(:uncache)
             end
           end
@@ -302,10 +302,10 @@ module Volt
         #
         # Raise error unless caller's class namespace is Volt::RepoCache.
         def model.refresh_association(association)
-          # debug __method__, __LINE__, "association=#{association.foreign_name}"
+          # debug_model __method__, __LINE__, "association=#{association.foreign_name}"
           # refresh the association query
           result = get_association(association, refresh: true)
-          # debug __method__, __LINE__, "#{self} association=#{association} result=#{result}"
+          # debug_model __method__, __LINE__, "#{self} association=#{association} result=#{result}"
         end
         model.singleton_class.send(:private, :refresh_association)
 
@@ -322,22 +322,22 @@ module Volt
         # (e.g. console) running.
         # Returns a promise with destroyed model proxy as value.
         def model.__destroy__
-          # debug __method__, __LINE__
+          # debug_model __method__, __LINE__
           fail_if_read_only(__method__)
-          # debug __method__, __LINE__
+          # debug_model __method__, __LINE__
           promise = if created_in_cache? || new?
             Promise.value(self)
           else
             destroy(caller: self)
           end
-          # debug __method__, __LINE__
+          # debug_model __method__, __LINE__
           promise.then do |m|
-            # debug __method__, __LINE__, "destroy promise resolved to #{m}"
+            # debug_model __method__, __LINE__, "destroy promise resolved to #{m}"
             @__cache__collection.destroyed(self)
             uncache
             self
           end.fail do |errors|
-            # debug __method__, __LINE__, "destroy failed => #{errors}"
+            # debug_model __method__, __LINE__, "destroy failed => #{errors}"
             errors
           end
         end
@@ -355,23 +355,23 @@ module Volt
         # Relies on cached collections notifying
         # associated models when to refresh.
         def model.get_association(assoc, refresh: false)
-          # debug __method__, __LINE__, "#{self.class.name}:#{id} assoc=#{assoc.foreign_name} refresh: #{refresh}"
+          # debug_model __method__, __LINE__, "#{self.class.name}:#{id} assoc=#{assoc.foreign_name} refresh: #{refresh}"
           foreign_name = assoc.foreign_name
           @__cache__associations[foreign_name] = nil if refresh
           prior = @__cache__associations[foreign_name]
           local_id = self.send(assoc.local_id_field)
           foreign_id_field = assoc.foreign_id_field
-          # debug __method__, __LINE__, "foreign_id_field=#{foreign_id_field}"
+          # debug_model __method__, __LINE__, "foreign_id_field=#{foreign_id_field}"
           result = if prior && match?(prior, foreign_id_field, local_id)
             prior
           else
             q = {foreign_id_field => local_id}
-            # debug __method__, __LINE__
+            # debug_model __method__, __LINE__
             r = assoc.foreign_collection.query(q) || []
-            # debug __method__, __LINE__
+            # debug_model __method__, __LINE__
             @__cache__associations[foreign_name] = assoc.has_many? ? ModelArray.new(contents: r) : r.first
           end
-          # debug __method__, __LINE__
+          # debug_model __method__, __LINE__
           result
         end
         model.singleton_class.send(:private, :get_association)
@@ -536,11 +536,11 @@ module Volt
           fail_if_read_only(__method__)
           validate_ownership(assoc, other, require_foreign_id: false) do |prior_foreign_id|
             # after validation we can be sure prior_foreign_id == self.id
-            # debug __method__, __LINE__
+            # debug_model __method__, __LINE__
             unless prior_foreign_id
               other.send(Util.setter(assoc.foreign_id_field), id)
             end
-            # debug __method__, __LINE__
+            # debug_model __method__, __LINE__
           end
         end
         model.singleton_class.send(:private, :set_foreign_id)
@@ -572,9 +572,9 @@ module Volt
         # if it does not match this model's id. Otherwise return true
         # if the foreign id is not nil. Yield to given block if provided.
         def model.validate_ownership(assoc, other, require_foreign_id: true, &block)
-          # debug __method__, __LINE__
+          # debug_model __method__, __LINE__
           foreign_id = other.send(assoc.foreign_id_field)
-          # debug __method__, __LINE__
+          # debug_model __method__, __LINE__
           if (foreign_id && foreign_id != self.id) || (require_foreign_id && foreign_id.nil?)
             raise RuntimeError, "#{other} should belong to #{self} or no-one else"
           end
@@ -619,13 +619,13 @@ module Volt
           promises = []
           @__cache__collection.associations.values.each do |assoc|
             if assoc.has_any?
-              # debug __method__, __LINE__, "association => '#{association}'"
+              # debug_model __method__, __LINE__, "association => '#{association}'"
               model_or_array = send(assoc.foreign_name)
-              # debug __method__, __LINE__, "model_or_array => '#{model_or_array}'"
+              # debug_model __method__, __LINE__, "model_or_array => '#{model_or_array}'"
               Util.arrify(model_or_array).each do |model|
                 promises << model.flush!
               end
-              # debug __method__, __LINE__
+              # debug_model __method__, __LINE__
             end
           end
           Promise.when(*promises)
@@ -638,21 +638,21 @@ module Volt
           fail_if_read_only(__method__)
           @__cache__collection.associations.values.each do |assoc|
             if assoc.has_any?
-              # debug __method__, __LINE__, "association => '#{association}'"
+              # debug_model __method__, __LINE__, "association => '#{association}'"
               model_or_array = send(assoc.foreign_name)
               if model_or_array
-                # debug __method__, __LINE__, "model_or_array => '#{model_or_array}'"
+                # debug_model __method__, __LINE__, "model_or_array => '#{model_or_array}'"
                 Util.arrify(model_or_array).each do |model|
                   model.mark_for_destruction!
                 end
-                # debug __method__, __LINE__
+                # debug_model __method__, __LINE__
               end
             end
           end
         end
         model.singleton_class.send(:private, :mark_associations_for_destruction)
 
-        def model.debug(method, line, msg = nil)
+        def model.debug_model(method, line, msg = nil)
           s = ">>> #{self.class.name}##{method}[#{line}] : #{msg}"
           if RUBY_PLATFORM == 'opal'
             Volt.logger.debug s
@@ -660,7 +660,7 @@ module Volt
             puts s
           end
         end
-        model.singleton_class.send(:private, :debug)
+        model.singleton_class.send(:private, :debug_model)
 
       end
 

@@ -20,9 +20,7 @@ module Volt
       attr_reader :read_only
 
       def initialize(cache: nil, name: nil, options: {})
-        # debug __method__, __LINE__, "name: #{name} options: #{options}"
         super(observer: self)
-        # debug __method__, __LINE__
         @cache = cache
         @name = name
         @load_query = options[:query] || options[:where]
@@ -33,7 +31,6 @@ module Volt
         @repo_collection = @cache.repo.send(name)
         init_associations(options)
         load
-        # debug __method__, __LINE__
       end
 
       # hide circular reference to cache
@@ -137,11 +134,8 @@ module Volt
       end
 
       def notify_associations(action, model)
-        # debug __method__, __LINE__, "action=#{action} model=#{model} associations=#{associations}"
         associations.each_value do |assoc|
-          # debug __method__, __LINE__, "calling notify_associates(#{assoc}, #{action}, #{model})"
           notify_associates(assoc, action, model)
-          # debug __method__, __LINE__, "called notify_associates(#{assoc}, #{action}, #{model})"
         end
       end
 
@@ -152,22 +146,17 @@ module Volt
       # association may be owner customer - thus
       # association will be belongs_to
       def notify_associates(assoc, action, model)
-        # debug __method__, __LINE__, "action=#{action} model=#{model} assoc=#{assoc} reciprocate=#{assoc.reciprocal}"
         if assoc.reciprocal
           local_id = model.send(assoc.local_id_field)
-          # debug __method__, __LINE__, "local_id #{assoc.local_id_field}=#{local_id}"
           if local_id # may not be set yet
             assoc.foreign_collection.each do |other|
-              # debug __method__, __LINE__, "calling #{assoc.foreign_id_field} on #{other}"
               foreign_id = other.send(assoc.foreign_id_field)
               if local_id == foreign_id
-                # debug __method__, __LINE__, "foreign_id==local_id of #{other}, calling other.refresh_association(#{assoc.foreign_name})"
                 other.send(:refresh_association, assoc.reciprocal)
               end
             end
           end
         end
-        # debug __method__, __LINE__
       end
 
       # 'Induct' a model into the cache via this collection.
@@ -219,30 +208,21 @@ module Volt
       end
 
       def load
-        # debug __method__, __LINE__
         @loaded_ids = Set.new  # append/delete will update
         q = @load_query ? repo_collection.where(@load_query) : repo_collection
-        # t1 = Time.now
         @loaded = q.all.collect{|e|e}.then do |models|
-          # t2 = Time.now
-          # debug __method__, __LINE__, "#{name} read_only=#{read_only} query promise resolved to #{models.size} models in #{t2-t1} seconds"
           models.each do |model|
             append(read_only ? model : model.buffer, error_unless_new: false, notify: false)
           end
-          # t3 = Time.now
-          # debug __method__, __LINE__, "#{name} loaded ids for #{models.size} #{name} in #{t3-t2} seconds"
           self
         end
-        # debug __method__, __LINE__, "@loaded => #{@loaded.class.name}:#{@loaded.value.class.name}"
       end
 
       def init_associations(options)
-        # debug __method__, __LINE__, "options = #{options}"
         @associations = {}
         [:belongs_to, :has_one, :has_many].each do |type|
           arrify(options[type]).map(&:to_sym).each do |foreign_name|
             @associations[foreign_name] = Association.new(self, foreign_name, type)
-            # debug __method__, __LINE__, "@associations[#{foreign_name}] = #{@associations[foreign_name].inspect}"
           end
         end
       end

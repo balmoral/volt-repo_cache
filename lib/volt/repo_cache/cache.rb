@@ -36,7 +36,6 @@ module Volt
       # read_only should be inherited by has_... targets
       #
       def initialize(**options)
-        # debug __method__, __LINE__, "@options = #{@options}"
         @repo = options.delete(:repo) || Volt.current_app.store
         @collection_options = options.delete(:collections) || {}
         load
@@ -62,7 +61,6 @@ module Volt
       def clear
         # debug __method__, __LINE__
         @collections.each do |name, collection|
-          # debug __method__, __LINE__, "name=#{name} collection=#{collection}"
           collection.send(:uncache)
         end
         @collections = {}
@@ -90,20 +88,13 @@ module Volt
         promises = []
         @collection_options.each do |given_name, options|
           name = collection_name(given_name)
-          # debug __method__, __LINE__
           collection = Collection.new(cache: self, name: name, options: options)
-          # debug __method__, __LINE__
           @collections[name] = collection
           promises << collection.loaded
         end
-        # debug __method__, __LINE__, "promises.size = #{promises.size}"
-        t1 = Time.now
         @loaded = Promise.when(*promises).then do
-          # t2 = Time.now
-          # debug __method__, __LINE__, "@@loaded = Promise.when(*promises).then took #{t2-t1} seconds"
           self
         end
-        # debug __method__, __LINE__, "@loaded => #{@loaded.class.name}:#{@loaded.value.class.name}"
       end
 
       def collection_name(given_name)
