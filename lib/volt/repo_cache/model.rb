@@ -177,8 +177,9 @@ module Volt
               # debug_model __method__, __LINE__, "marked for destruction so call destroy on #{to_h}"
               __destroy__
             else
+              debug_model __method__, __LINE__, "@__cache__created_in_cache=#{@__cache__created_in_cache} dirty?=#{dirty?} to_h=#{to_h}"
               if @__cache__created_in_cache || dirty?
-                # debug_model __method__, __LINE__, "is dirty: #{to_h}"
+                debug_model __method__, __LINE__, "is dirty: #{to_h}"
                 if @__cache__created_in_cache
                   # debug_model __method__, __LINE__, "new: #{self.class.name}::#{self.id}"
                   @__cache__created_in_cache = false
