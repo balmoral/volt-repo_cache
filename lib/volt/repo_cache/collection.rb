@@ -13,7 +13,7 @@ module Volt
       attr_reader :model_class
       attr_reader :repo_collection
       attr_reader :load_query
-      attr_reader :loaded_ids
+      attr_reader :cached_ids
       attr_reader :loaded # Promise
       attr_reader :marked_for_destruction
       attr_reader :associations
@@ -67,7 +67,7 @@ module Volt
         append(hash.to_h)
       end
 
-      # Appends a model to the collection.
+      # Appends a new model to the collection.
       # Model may be a hash which will be converted.
       # (See #induct for more.)
       # If the model belongs_to any other owners, the foreign id(s)
@@ -75,8 +75,8 @@ module Volt
       # in the cache - it is easier to ask the owner for a new
       # instance (e.g. product.recipe.new_ingredient).
       # NB: Returns the newly appended model.
-      def append(model, error_if_present: true, error_unless_new: true,  notify: true)
-        model = induct(model, error_unless_new: error_unless_new, error_if_present: error_if_present)
+      def append(model, notify: true)
+        model = induct(model, loaded_from_repo: false)
         __append__(model, notify: notify)
         model
       end
@@ -120,7 +120,7 @@ module Volt
       # Remove model from marked_for_destruction bucket.
       # Don't worry if we can't find it.
       def destroyed(model)
-        @loaded_ids.delete(model.id)
+        @cached_ids.delete(model.id)
         @marked_for_destruction.delete(model.id)
       end
 
@@ -128,7 +128,6 @@ module Volt
       # that a model has been added or removed. Pass
       # this on to associations.
       def observe(action, model)
-        # debug __method__, __LINE__, "action=#{action} model=#{model} associations=#{associations}"
         # notify owner model(s) of appended model that it has been added
         notify_associations(action, model)
       end
@@ -182,37 +181,42 @@ module Volt
       #   associational integrity in the cache.
       #
       # Returns the inducted model.
-      def induct(model_or_hash, error_unless_new: true, error_if_present: true)
-        created_in_cache = false
-        if model_or_hash.is_a?(Hash)
-          created_in_cache = true
-          model = model_class.new(model_or_hash, options: {persistor: cache.persistor})
+      def induct(model_or_hash, loaded_from_repo: false)
+        model = if Hash === model_or_hash
+          if loaded_from_repo
+            raise TypeError, "cannot induct stored model from a hash #{model_or_hash}"
+          end
+          model_class.new(model_or_hash, options: {persistor: cache.persistor})
         else
-          model = model_or_hash
-          # unless model.persistor.class == cache.persistor.class
-          #   raise RuntimeError, "model persistor is #{model.persistor} but should be #{cache.persistor}"
-          # end
-          unless model.class == model_class
-            raise ArgumentError, "#{model} must be a #{model_class_name}"
+          if !loaded_from_repo && model_or_hash.buffer?
+            raise TypeError, "cannot induct new model_or_hash #{model_or_hash} with buffer"
           end
-          if error_unless_new && (!model.created_in_cache? || model.new?)
-            raise ArgumentError, "#{model} must be new (not stored) or have been created in cache"
-          end
-          if error_if_present && @loaded_ids.include?(model.id)
-            raise RuntimeError, "cannot add #{model} already in cached collection"
-          end
+          model_or_hash
         end
-        @loaded_ids << model.id
-        patch_for_cache(model, created_in_cache)
+        unless model.class == model_class
+          raise ArgumentError, "#{model} must be a #{model_class_name}"
+        end
+        if model.cached?
+          __debug __method__, __LINE__, "id=#{model.id} model.cached?=#{model.cached?}"
+          raise TypeError, "model.id #{model.id} already in cache"
+        end
+        @cached_ids << model.id
+        RepoCache::Model.induct_to_cache(model, self, loaded_from_repo)
         model
       end
 
+      def cached?(model)
+        @cached_ids.include?(model.id)
+      end
+
       def load
-        @loaded_ids = Set.new  # append/delete will update
+        @cached_ids = Set.new  # append/delete will update
         q = @load_query ? repo_collection.where(@load_query) : repo_collection
         @loaded = q.all.collect{|e|e}.then do |models|
-          models.each do |model|
-            append(read_only ? model : model.buffer, error_unless_new: false, notify: false)
+          models.each do |_model|
+            model = read_only ? _model : _model.buffer
+            induct(model, loaded_from_repo: true)
+            __append__(model, notify: false)
           end
           self
         end
@@ -227,12 +231,14 @@ module Volt
         end
       end
 
-      def patch_for_cache(model, created_in_cache)
-        unless model.respond_to?(:patched_for_cache?)
-          RepoCache::Model.patch_for_cache(model, self, created_in_cache)
-        end
-        model
-      end
+      def __debug(method, line, msg = nil)
+         s = "{__FILE__}[#{line}]:#{self.class.name}##{method}: #{msg}"
+         if RUBY_PLATFORM == 'opal'
+           Volt.logger.debug s
+         else
+           puts s
+         end
+       end
 
     end
   end

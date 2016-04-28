@@ -5,18 +5,30 @@
 # the instance as argument.
 
 module Volt
+  class Model
+    def stored?
+      false
+    end
+
+    def cached?
+      false
+    end
+  end
+end
+
+module Volt
   module RepoCache
     module Model
       extend Volt::RepoCache::Util
 
-      def self.patch_for_cache(model, collection, created_in_cache)
+      def self.induct_to_cache(model, collection, loaded_from_repo)
         # debug_model __method__, __LINE__, "patch_for_cache [#{collection.name}] : #{model.to_h}"
 
         # Volt sets @new to false if any attribute changes - not what we want
-        model.instance_variable_set(:@__cache__created_in_cache, created_in_cache)
-        model.instance_variable_set(:@__cache__collection, collection)
-        model.instance_variable_set(:@__cache__associations, {})
-        model.instance_variable_set(:@__cache__marked_for_destruction, false)
+        model.instance_variable_set(:@cache__stored, loaded_from_repo)
+        model.instance_variable_set(:@cache__collection, collection)
+        model.instance_variable_set(:@cache__associations, {})
+        model.instance_variable_set(:@cache__marked_for_destruction, false)
         # TODO: if model is not buffered, then trap all
         # field set value methods and raise exception -
         # unless buffered the model is read only.
@@ -99,34 +111,38 @@ module Volt
           true
         end
 
-        def model.created_in_cache?
-          @__cache__created_in_cache
+        def model.stored?
+          @cache__stored
         end
 
         # Returns true if the model has been marked
         # for destruction on flush. Otherwise false.
         def model.marked_for_destruction?
-          @__cache__marked_for_destruction
+          @cache__marked_for_destruction
+        end
+
+        def model.cached?
+          @cache__collection.cached?(self)
         end
 
         # Returns the cached collected the model belongs to.
         def model.collection
-          @__cache__collection
+          @cache__collection
         end
 
         # Returns the cache the model belongs to.
         def model.cache
-          @__cache__collection.cache
+          @cache__collection.cache
         end
 
         # Hide circular reference to collection
         # when doing inspection.
         def model.inspect
-          if @__cache__collection
-            __tmp = @__cache__collection
-            @__cache__collection = "{{#{@__cache__collection.name}}}"
+          if @cache__collection
+            __tmp = @cache__collection
+            @cache__collection = "{{#{@cache__collection.name}}}"
             result = super
-            @__cache__collection = __tmp
+            @cache__collection = __tmp
             result
           else
             super
@@ -147,10 +163,10 @@ module Volt
             # prevent collection going in circles on this
             # (we don't know whether initial request was to
             # self or to collection which holds self)
-            unless @__cache__marked_for_destruction
+            unless @cache__marked_for_destruction
               # debug_model __method__, __LINE__, "marking #{self} for destruction"
-              @__cache__marked_for_destruction = true
-              @__cache__collection.send(:mark_model_for_destruction, self)
+              @cache__marked_for_destruction = true
+              @cache__collection.send(:mark_model_for_destruction, self)
               mark_associations_for_destruction
             end
           end
@@ -173,20 +189,20 @@ module Volt
           # - any part of it may fail without unwinding the whole
           def model.flush!
             fail_if_read_only(__method__)
-            if @__cache__marked_for_destruction
+            if @cache__marked_for_destruction
               # debug_model __method__, __LINE__, "marked for destruction so call destroy on #{to_h}"
               __destroy__
             else
-              debug_model __method__, __LINE__, "@__cache__created_in_cache=#{@__cache__created_in_cache} dirty?=#{dirty?} to_h=#{to_h}"
-              if @__cache__created_in_cache || dirty?
-                debug_model __method__, __LINE__, "is dirty: #{to_h}"
-                if @__cache__created_in_cache
-                  # debug_model __method__, __LINE__, "new: #{self.class.name}::#{self.id}"
-                  @__cache__created_in_cache = false
-                  @__cache__collection.repo_collection << self
-                else
+              if dirty?
+                debug_model __method__, __LINE__, "@cache__stored=#{@cache__stored} dirty?=#{dirty?} to_h=#{to_h}"
+                if stored?
                   # debug_model __method__, __LINE__,"dirty: #{self.class.name}::#{self.id}"
                   __save__
+                else
+                  debug_model __method__, __LINE__, "<< to repo: #{self.class.name}::#{self.to_h}"
+                  @cache__stored = true
+                  @cache__collection.repo_collection << self
+                  # TODO: big problem! once new model saved it should become buffer in cache!
                 end
               else
                 # debug_model __method__, __LINE__, "not dirty: #{to_h}"
@@ -209,7 +225,8 @@ module Volt
             self.class.fields_data.keys.each do |field|
               return true if changed?(field)
             end
-            @__cache__created_in_cache
+            # if not stored then I'm dirty
+            !@cache__stored
           end
 
           # Destroys (deletes) the model in database.
@@ -253,7 +270,7 @@ module Volt
         # #######################################
 
         def model.fail_if_read_only(what)
-          if @__cache__collection.read_only
+          if @cache__collection.read_only
             raise RuntimeError, "cannot #{what} for read only cache collection/model"
           end
         end
@@ -261,7 +278,7 @@ module Volt
 
         # private
         def model.uncache
-          @__cache__associations.clear if @__cache__associations
+          @cache__associations.clear if @cache__associations
           if false
             instance_variables.each do |v|
               if v.to_s =~ /__cache__/
@@ -270,7 +287,7 @@ module Volt
               end
             end
           elsif false
-            @__cache__associations.clear if @__cache__associations
+            @cache__associations.clear if @cache__associations
             instance_variables.each do |v|
               if v.to_s =~ /__cache__/
                 # debug_model __method__, __LINE__, "removing instance variable '#{v}'"
@@ -326,15 +343,15 @@ module Volt
           # debug_model __method__, __LINE__
           fail_if_read_only(__method__)
           # debug_model __method__, __LINE__
-          promise = if created_in_cache? || new?
-            Promise.value(self)
-          else
+          promise = if stored?
             destroy(caller: self)
+          else
+            Promise.value(self)
           end
           # debug_model __method__, __LINE__
           promise.then do |m|
             # debug_model __method__, __LINE__, "destroy promise resolved to #{m}"
-            @__cache__collection.destroyed(self)
+            @cache__collection.destroyed(self)
             uncache
             self
           end.fail do |errors|
@@ -358,8 +375,8 @@ module Volt
         def model.get_association(assoc, refresh: false)
           # debug_model __method__, __LINE__, "#{self.class.name}:#{id} assoc=#{assoc.foreign_name} refresh: #{refresh}"
           foreign_name = assoc.foreign_name
-          @__cache__associations[foreign_name] = nil if refresh
-          prior = @__cache__associations[foreign_name]
+          @cache__associations[foreign_name] = nil if refresh
+          prior = @cache__associations[foreign_name]
           local_id = self.send(assoc.local_id_field)
           foreign_id_field = assoc.foreign_id_field
           # debug_model __method__, __LINE__, "foreign_id_field=#{foreign_id_field}"
@@ -370,7 +387,7 @@ module Volt
             # debug_model __method__, __LINE__
             r = assoc.foreign_collection.query(q) || []
             # debug_model __method__, __LINE__
-            @__cache__associations[foreign_name] = assoc.has_many? ? ModelArray.new(contents: r) : r.first
+            @cache__associations[foreign_name] = assoc.has_many? ? ModelArray.new(contents: r) : r.first
           end
           # debug_model __method__, __LINE__
           result
@@ -435,7 +452,7 @@ module Volt
         # has_many then any prior associated values
         # will be marked for destruction.
         #
-        # NB we don't immediately update local @__cache__associations,
+        # NB we don't immediately update local @cache__associations,
         # but wait to be notified by associated collections
         # of changes we make to them. This ensures that
         # if changes are made to those collections that
@@ -618,7 +635,7 @@ module Volt
         # from flushing associates.
         def model.flush_associations
           promises = []
-          @__cache__collection.associations.values.each do |assoc|
+          @cache__collection.associations.values.each do |assoc|
             if assoc.has_any?
               # debug_model __method__, __LINE__, "association => '#{association}'"
               model_or_array = send(assoc.foreign_name)
@@ -637,7 +654,7 @@ module Volt
         # Marks all has_one or has_many models for destruction
         def model.mark_associations_for_destruction
           fail_if_read_only(__method__)
-          @__cache__collection.associations.values.each do |assoc|
+          @cache__collection.associations.values.each do |assoc|
             if assoc.has_any?
               # debug_model __method__, __LINE__, "association => '#{association}'"
               model_or_array = send(assoc.foreign_name)
@@ -654,7 +671,7 @@ module Volt
         model.singleton_class.send(:private, :mark_associations_for_destruction)
 
         def model.debug_model(method, line, msg = nil)
-          s = ">>> #{self.class.name}##{method}[#{line}] : #{msg}"
+          s = "#{__FILE__}[#{line}]:#{self.class.name}##{method}: #{msg}"
           if RUBY_PLATFORM == 'opal'
             Volt.logger.debug s
           else
