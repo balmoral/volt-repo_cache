@@ -191,15 +191,16 @@ module Volt
             fail_if_read_only(__method__)
             if @cache__marked_for_destruction
               # debug_model __method__, __LINE__, "marked for destruction so call destroy on #{to_h}"
-              __destroy__
+              @cache__marked_for_destruction = false
+              Promise.when(__destroy__, flush_associations)
             else
               if dirty?
-                debug_model __method__, __LINE__, "@cache__stored=#{@cache__stored} dirty?=#{dirty?} to_h=#{to_h}"
+                # debug_model __method__, __LINE__, "@cache__stored=#{@cache__stored} dirty?=#{dirty?} to_h=#{to_h}"
                 if stored?
                   # debug_model __method__, __LINE__,"dirty: #{self.class.name}::#{self.id}"
                   __save__
                 else
-                  debug_model __method__, __LINE__, "<< to repo: #{self.class.name}::#{self.to_h}"
+                  # debug_model __method__, __LINE__, "<< to repo: #{self.class.name}::#{self.to_h}"
                   @cache__stored = true
                   @cache__collection.repo_collection << self
                   # TODO: big problem! once new model saved it should become buffer in cache!
@@ -339,23 +340,24 @@ module Volt
         # MESSAGE_BUS is on and there's another connection
         # (e.g. console) running.
         # Returns a promise with destroyed model proxy as value.
+        # TODO: destroy any has_many association
         def model.__destroy__
           # debug_model __method__, __LINE__
           fail_if_read_only(__method__)
-          # debug_model __method__, __LINE__
+          debug_model __method__, __LINE__
           promise = if stored?
             destroy(caller: self)
           else
             Promise.value(self)
           end
-          # debug_model __method__, __LINE__
-          promise.then do |m|
-            # debug_model __method__, __LINE__, "destroy promise resolved to #{m}"
+          debug_model __method__, __LINE__
+          promise.then do |result|
+            debug_model __method__, __LINE__, "destroy promise result => #{result}"
             @cache__collection.destroyed(self)
             uncache
             self
           end.fail do |errors|
-            # debug_model __method__, __LINE__, "destroy failed => #{errors}"
+            debug_model __method__, __LINE__, "destroy failed => #{errors}"
             errors
           end
         end
@@ -666,6 +668,7 @@ module Volt
                 # debug_model __method__, __LINE__
               end
             end
+            @cache__collection.flush!
           end
         end
         model.singleton_class.send(:private, :mark_associations_for_destruction)

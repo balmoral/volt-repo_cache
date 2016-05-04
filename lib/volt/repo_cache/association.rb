@@ -92,6 +92,15 @@ module Volt
         @local_collection = @foreign_collection = @reciprocal = nil
       end
 
+      def __debug(level, file, line, method, msg = nil)
+         s = "#{file}[#{line}]:#{self.class.name}##{method}: #{msg}"
+         if RUBY_PLATFORM == 'opal'
+           Volt.logger.debug s
+         else
+           puts s
+         end
+       end
+
     end
   end
 end

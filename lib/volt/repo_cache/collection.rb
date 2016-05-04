@@ -52,10 +52,14 @@ module Volt
           # models are removed from @marked_from_destruction as
           # they are flushed, so we need a copy of them to enumerate
           @marked_for_destruction.values.dup.each do |e|
+            # __debug __method__, __LINE__, "@marked_for_destruction calling #{e.class}:#{e.id}.flush!"
             promises << e.flush!
+            # __debug __method__, __LINE__, "@marked_for_destruction called #{e.class}:#{e.id}.flush!"
           end
           each do |e|
+            # __debug __method__, __LINE__, "each calling #{e.class}:#{e.id}.flush!"
             promises << e.flush!
+            # __debug __method__, __LINE__, "each called #{e.class}:#{e.id}.flush!"
           end
         end
         Promise.when(*promises)
@@ -114,14 +118,16 @@ module Volt
         end
         @marked_for_destruction[model.id] = model
         __remove__(model, error_if_absent: true)
+        @cached_ids.delete(model.id)
       end
 
       # Called by RepoCache::Model#__destroy__.
       # Remove model from marked_for_destruction bucket.
       # Don't worry if we can't find it.
       def destroyed(model)
-        @cached_ids.delete(model.id)
-        @marked_for_destruction.delete(model.id)
+        # __debug __method__, __LINE__, "#{model.class}.id=#{model.id}"
+        result = @marked_for_destruction.delete(model.id)
+        # __debug __method__, __LINE__, "@marked_for_destruction.delete(#{model.id}) => #{result}"
       end
 
       # Collection is being notified (probably by super/self)
@@ -197,7 +203,7 @@ module Volt
           raise ArgumentError, "#{model} must be a #{model_class_name}"
         end
         if model.cached?
-          __debug __method__, __LINE__, "id=#{model.id} model.cached?=#{model.cached?}"
+          # __debug __method__, __LINE__, "id=#{model.id} model.cached?=#{model.cached?}"
           raise TypeError, "model.id #{model.id} already in cache"
         end
         @cached_ids << model.id
@@ -232,7 +238,7 @@ module Volt
       end
 
       def __debug(method, line, msg = nil)
-         s = "{__FILE__}[#{line}]:#{self.class.name}##{method}: #{msg}"
+         s = "#{__FILE__}[#{line}]:#{self.class.name}##{method}: #{msg}"
          if RUBY_PLATFORM == 'opal'
            Volt.logger.debug s
          else
