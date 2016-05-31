@@ -16,9 +16,10 @@ module Volt
       #
       # Collections is an array of hashes each with a collection
       # name as key, and a hash of options as value.
-      # Options are:
-      # :where => query (as for store._collection.where(query))
-      # ...
+      # Collection options are:
+      #   :where => query (as for store._collection.where(query))
+      #   :filter => a proc receiving a model as arg, returns true to load
+      #
       # The cache should be used until the 'loaded' promise
       # resolves.
       #
@@ -99,6 +100,13 @@ module Volt
 
       def collection_name(given_name)
         n = given_name.to_s.underscore.pluralize
+        if RUBY_PLATFORM == 'opal'
+          if n[-2,2] == 'ss'
+            rx = given_name.sub(/s$/i, 's')
+            s = "#{__FILE__}[#{__LINE__}]:#{self.class.name}##{__method__}: given_name=#{given_name} n=#{n} rx=#{rx}"
+            `console.log(s)`
+          end
+        end
         n = '_' + n unless n[0] == '_'
         n.to_sym
       end

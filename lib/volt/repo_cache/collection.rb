@@ -24,6 +24,7 @@ module Volt
         @cache = cache
         @name = name
         @load_query = options[:query] || options[:where]
+        @load_filter = options[:filter]
         @read_only = options[:read_only].nil? ? true : options[:read_only]
         @marked_for_destruction = {}
         @model_class_name = @name.to_s.singularize.camelize
@@ -52,14 +53,14 @@ module Volt
           # models are removed from @marked_from_destruction as
           # they are flushed, so we need a copy of them to enumerate
           @marked_for_destruction.values.dup.each do |e|
-            # __debug __method__, __LINE__, "@marked_for_destruction calling #{e.class}:#{e.id}.flush!"
+            # __debug 1, __FILE__, __LINE__, __method__, "@marked_for_destruction calling #{e.class}:#{e.id}.flush!"
             promises << e.flush!
-            # __debug __method__, __LINE__, "@marked_for_destruction called #{e.class}:#{e.id}.flush!"
+            # __debug 1, __FILE__, __LINE__, __method__, "@marked_for_destruction called #{e.class}:#{e.id}.flush!"
           end
           each do |e|
-            # __debug __method__, __LINE__, "each calling #{e.class}:#{e.id}.flush!"
+            # __debug 1, __FILE__, __LINE__, __method__, "each calling #{e.class}:#{e.id}.flush!"
             promises << e.flush!
-            # __debug __method__, __LINE__, "each called #{e.class}:#{e.id}.flush!"
+            # __debug 1, __FILE__, __LINE__, __method__, "each called #{e.class}:#{e.id}.flush!"
           end
         end
         Promise.when(*promises)
@@ -125,9 +126,9 @@ module Volt
       # Remove model from marked_for_destruction bucket.
       # Don't worry if we can't find it.
       def destroyed(model)
-        # __debug __method__, __LINE__, "#{model.class}.id=#{model.id}"
+        # __debug 1, __FILE__, __LINE__, __method__, "#{model.class}.id=#{model.id}"
         result = @marked_for_destruction.delete(model.id)
-        # __debug __method__, __LINE__, "@marked_for_destruction.delete(#{model.id}) => #{result}"
+        # __debug 1, __FILE__, __LINE__, __method__, "@marked_for_destruction.delete(#{model.id}) => #{result}"
       end
 
       # Collection is being notified (probably by super/self)
@@ -203,7 +204,7 @@ module Volt
           raise ArgumentError, "#{model} must be a #{model_class_name}"
         end
         if model.cached?
-          # __debug __method__, __LINE__, "id=#{model.id} model.cached?=#{model.cached?}"
+          # __debug 1, ->{[__FILE__, __LINE__, __method__, "id=#{model.id} model.cached?=#{model.cached?}"]}
           raise TypeError, "model.id #{model.id} already in cache"
         end
         @cached_ids << model.id
@@ -218,11 +219,13 @@ module Volt
       def load
         @cached_ids = Set.new  # append/delete will update
         q = @load_query ? repo_collection.where(@load_query) : repo_collection
-        @loaded = q.all.collect{|e|e}.then do |models|
+        @loaded = q.all.map{|e|e}.then do |models|
           models.each do |_model|
-            model = read_only ? _model : _model.buffer
-            induct(model, loaded_from_repo: true)
-            __append__(model, notify: false)
+            if @load_filter.nil? || @load_filter.call(_model)
+              model = read_only ? _model : _model.buffer
+              induct(model, loaded_from_repo: true)
+              __append__(model, notify: false)
+            end
           end
           self
         end
@@ -237,8 +240,9 @@ module Volt
         end
       end
 
-      def __debug(method, line, msg = nil)
-         s = "#{__FILE__}[#{line}]:#{self.class.name}##{method}: #{msg}"
+      def __debug(level, proc)
+        file, line, method, msg = proc.call
+         s = "#{file}[#{line}]:#{self.class.name}##{method}: #{msg}"
          if RUBY_PLATFORM == 'opal'
            Volt.logger.debug s
          else

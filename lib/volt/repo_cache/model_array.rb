@@ -45,8 +45,12 @@ module Volt
         @contents[index]
       end
 
+      def any?
+        @contents.any?
+      end
+
       def empty?
-        @contents.empty
+        @contents.empty?
       end
 
       def detect(*args, &block)
