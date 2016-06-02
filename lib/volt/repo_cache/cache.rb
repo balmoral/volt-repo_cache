@@ -105,6 +105,7 @@ module Volt
             rx = given_name.sub(/s$/i, 's')
             s = "#{__FILE__}[#{__LINE__}]:#{self.class.name}##{__method__}: given_name=#{given_name} n=#{n} rx=#{rx}"
             `console.log(s)`
+            n = rx
           end
         end
         n = '_' + n unless n[0] == '_'
