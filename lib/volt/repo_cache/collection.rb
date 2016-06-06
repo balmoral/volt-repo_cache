@@ -28,9 +28,9 @@ module Volt
         @read_only = options[:read_only].nil? ? true : options[:read_only]
         @marked_for_destruction = {}
         @model_class_name = @name.to_s.singularize
-        Volt.logger.debug "#{__FILE__}[#{__LINE__}] '#{@name}'.singularize => '#{@model_class_name}' "
+        # Volt.logger.debug "#{__FILE__}[#{__LINE__}] '#{@name}'.singularize => '#{@model_class_name}' "
         @model_class_name = @model_class_name.camelize
-        Volt.logger.debug "#{__FILE__}[#{__LINE__}] '#{@name}'.singularize.camelize => '#{@model_class_name}' "
+        # Volt.logger.debug "#{__FILE__}[#{__LINE__}] '#{@name}'.singularize.camelize => '#{@model_class_name}' "
         @model_class = Object.const_get(@model_class_name)
         @repo_collection = @cache.repo.send(name)
         init_associations(options)
