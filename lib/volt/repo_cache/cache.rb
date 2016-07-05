@@ -42,6 +42,10 @@ module Volt
         load
       end
 
+      def [](collection_name)
+        collections[collection_name.to_sym]
+      end
+
       def persistor
         @repo.persistor
       end

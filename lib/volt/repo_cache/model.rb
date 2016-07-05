@@ -353,7 +353,7 @@ module Volt
           debug_model __method__, __LINE__
           promise.then do |result|
             debug_model __method__, __LINE__, "destroy promise result => #{result}"
-            @cache__collection.destroyed(self)
+            @cache__collection.destroyed(self, caller: self)
             uncache
             self
           end.fail do |errors|

@@ -37,6 +37,73 @@ module Volt
         load
       end
 
+      def field_names
+        # Volt doesn't include :id in fields_data
+        @field_names ||= [:id] + @model_class.fields_data.keys.map(&:to_sym)
+      end
+
+      def destroy_all
+        each do |e|
+          e.mark_for_destruction!
+        end
+        flush!
+      end
+
+      # assumes first line is field names
+      # field_procs are optional procs for each field
+      # to preprocess field value.
+      # csv may be a single csv with lines separated by "\n"
+      # or an array of csv strings
+      def load_csv(csv, field_procs = nil)
+        lines = Array === csv ? csv : csv.split("\n")
+        if lines.size > 1
+          field_names = self.field_names
+          csv_fields = lines[0].split(',').map(&:to_sym)
+          csv_fields.each do |field|
+            unless field_names.include?(field)
+              fail "#{__method__} for #{name} : csv field '#{field}' is not a known field"
+            end
+          end
+          field_procs = csv_fields.map { |name|
+            field_procs.nil? ? nil : field_procs[name]
+          }
+          lines = lines[1..-1]
+          lines.each do |line|
+            # -1 to split forces trailing empty comma
+            # separated field to be returned as empty strings
+            # turn empty strings back to nil
+            values = line.split(',', -1).map { |s|
+              s.present? ? s.gsub('~;', ',') : nil
+            }
+            unless values.size == csv_fields.size
+              fail "#{__method__} for #{name} : values.size #{values.size} != field_names.size #{field_names.size} => '#{line}'"
+            end
+            hash = {}
+            values.each_with_index do |value, index|
+              proc = field_procs[index]
+              field = csv_fields[index]
+              hash[field] = proc ? proc.call(value) : value
+            end
+            create(hash)
+          end
+          flush!
+        end
+      end
+
+      def to_csv
+        io = StringIO.new
+        # fields include belongs_to foreign id fields
+        fields = field_names
+        csv_line(fields, io)
+        each do |model|
+          values = fields.map { |field|
+            model.get(field)
+          }
+          csv_line(values, io)
+        end
+        io.string
+      end
+
       # hide circular reference to cache
       def inspect
         __tmp = @cache
@@ -95,6 +162,18 @@ module Volt
         self
       end
 
+      # Called by RepoCache::Model#__destroy__.
+      # Remove model from marked_for_destruction bucket.
+      # Don't worry if we can't find it.
+      def destroyed(model, caller: nil)
+        unless caller.object_id == model.object_id
+          raise RuntimeError, "#{self.class.name} : only same instance of #{@model_class_name} can call #{__method__} for itself"
+        end
+        # __debug 1, __FILE__, __LINE__, __method__, "#{model.class}.id=#{model.id}"
+        result = @marked_for_destruction.delete(model.id)
+        # __debug 1, __FILE__, __LINE__, __method__, "@marked_for_destruction.delete(#{model.id}) => #{result}"
+      end
+
       private
 
       def fail_if_read_only(what)
@@ -123,15 +202,6 @@ module Volt
         @marked_for_destruction[model.id] = model
         __remove__(model, error_if_absent: true)
         @cached_ids.delete(model.id)
-      end
-
-      # Called by RepoCache::Model#__destroy__.
-      # Remove model from marked_for_destruction bucket.
-      # Don't worry if we can't find it.
-      def destroyed(model)
-        # __debug 1, __FILE__, __LINE__, __method__, "#{model.class}.id=#{model.id}"
-        result = @marked_for_destruction.delete(model.id)
-        # __debug 1, __FILE__, __LINE__, __method__, "@marked_for_destruction.delete(#{model.id}) => #{result}"
       end
 
       # Collection is being notified (probably by super/self)
@@ -241,6 +311,14 @@ module Volt
             @associations[foreign_name] = Association.new(self, foreign_name, type)
           end
         end
+      end
+
+      def csv_line(array, io)
+        array.each_with_index do |value, index|
+          io << ',' unless index == 0
+          io << value.to_s.gsub(',', '~;')
+        end
+        io << "\n"
       end
 
       def __debug(level, proc)

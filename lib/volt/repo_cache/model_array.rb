@@ -74,7 +74,16 @@ module Volt
       end
 
       def count(&block)
-        @contents.count(&block)
+        # count returns promise in Volt::ArrayModel, so do here
+        if block
+          result = 0
+          @contents.each do |e|
+            result += 1 if block.call(e)
+          end
+          result
+        else
+          @contents.size
+        end
       end
 
       def sort(&block)
