@@ -5,7 +5,6 @@ module Volt
     class Cache
       include Volt::RepoCache::Util
 
-
       attr_reader :options, :collections, :repo
       attr_reader :loaded # returns a promise
 
@@ -64,7 +63,6 @@ module Volt
       # when cache no longer required - can't be
       # used after this.
       def clear
-        # debug __method__, __LINE__
         @collections.each do |name, collection|
           collection.send(:uncache)
         end

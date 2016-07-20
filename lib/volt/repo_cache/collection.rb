@@ -19,22 +19,32 @@ module Volt
       attr_reader :associations
       attr_reader :read_only
 
-      def initialize(cache: nil, name: nil, options: {})
+      def initialize(cache: nil, name: nil, options: nil)
         super(observer: self)
         @cache = cache
         @name = name
+        options ||= {}
         @load_query = options[:query] || options[:where]
         @load_filter = options[:filter]
-        @read_only = options[:read_only].nil? ? true : options[:read_only]
+        @read_only = !!options[:read_only]
         @marked_for_destruction = {}
-        @model_class_name = @name.to_s.singularize
-        # Volt.logger.debug "#{__FILE__}[#{__LINE__}] '#{@name}'.singularize => '#{@model_class_name}' "
-        @model_class_name = @model_class_name.camelize
-        # Volt.logger.debug "#{__FILE__}[#{__LINE__}] '#{@name}'.singularize.camelize => '#{@model_class_name}' "
-        @model_class = Object.const_get(@model_class_name)
+        @model_class = options[:class]
+        if @model_class
+          @model_class_name = @model_class.name
+        else
+          @model_class_name = @name.to_s.singularize
+          # Volt.logger.debug "#{__FILE__}[#{__LINE__}] '#{@name}'.singularize => '#{@model_class_name}' "
+          @model_class_name = @model_class_name.camelize
+          # Volt.logger.debug "#{__FILE__}[#{__LINE__}] '#{@name}'.singularize.camelize => '#{@model_class_name}' "
+          @model_class = Object.const_get(@model_class_name)
+        end
         @repo_collection = @cache.repo.send(name)
         init_associations(options)
         load
+      end
+
+      def to_s
+        "#{self.class.name}<#{model_class_name} x #{size}>"
       end
 
       def field_names
@@ -118,20 +128,19 @@ module Volt
       # element promises are resolved.
       # TODO: error handling
       def flush!
+        fail_if_read_only(:flush!)
         promises = []
-        unless read_only
-          # models are removed from @marked_from_destruction as
-          # they are flushed, so we need a copy of them to enumerate
-          @marked_for_destruction.values.dup.each do |e|
-            # __debug 1, __FILE__, __LINE__, __method__, "@marked_for_destruction calling #{e.class}:#{e.id}.flush!"
-            promises << e.flush!
-            # __debug 1, __FILE__, __LINE__, __method__, "@marked_for_destruction called #{e.class}:#{e.id}.flush!"
-          end
-          each do |e|
-            # __debug 1, __FILE__, __LINE__, __method__, "each calling #{e.class}:#{e.id}.flush!"
-            promises << e.flush!
-            # __debug 1, __FILE__, __LINE__, __method__, "each called #{e.class}:#{e.id}.flush!"
-          end
+        # models are removed from @marked_from_destruction as
+        # they are flushed, so we need a copy of them to enumerate
+        @marked_for_destruction.values.dup.each do |e|
+          # __debug 1, __FILE__, __LINE__, __method__, "@marked_for_destruction calling #{e.class}:#{e.id}.flush!"
+          promises << e.flush!
+          # __debug 1, __FILE__, __LINE__, __method__, "@marked_for_destruction called #{e.class}:#{e.id}.flush!"
+        end
+        each do |e|
+          # __debug 1, __FILE__, __LINE__, __method__, "each calling #{e.class}:#{e.id}.flush!"
+          promises << e.flush!
+          # __debug 1, __FILE__, __LINE__, __method__, "each called #{e.class}:#{e.id}.flush!"
         end
         Promise.when(*promises)
       end
@@ -172,6 +181,10 @@ module Volt
         # __debug 1, __FILE__, __LINE__, __method__, "#{model.class}.id=#{model.id}"
         result = @marked_for_destruction.delete(model.id)
         # __debug 1, __FILE__, __LINE__, __method__, "@marked_for_destruction.delete(#{model.id}) => #{result}"
+      end
+
+      def cached?(model)
+        @cached_ids.include?(model.id)
       end
 
       private
@@ -278,15 +291,11 @@ module Volt
         end
         if model.cached?
           # __debug 1, ->{[__FILE__, __LINE__, __method__, "id=#{model.id} model.cached?=#{model.cached?}"]}
-          raise TypeError, "model.id #{model.id} already in cache"
+          raise TypeError, "#{model.class.name}<#{model.id}> already in cache"
         end
         @cached_ids << model.id
         RepoCache::Model.induct_to_cache(model, self, loaded_from_repo)
         model
-      end
-
-      def cached?(model)
-        @cached_ids.include?(model.id)
       end
 
       def load
@@ -295,7 +304,7 @@ module Volt
         @loaded = q.all.map{|e|e}.then do |models|
           models.each do |_model|
             if @load_filter.nil? || @load_filter.call(_model)
-              model = read_only ? _model : _model.buffer
+              model = _model.buffer # always a buffer so no write back
               induct(model, loaded_from_repo: true)
               __append__(model, notify: false)
             end

@@ -22,16 +22,13 @@ module Volt
       extend Volt::RepoCache::Util
 
       def self.induct_to_cache(model, collection, loaded_from_repo)
-        # debug_model __method__, __LINE__, "patch_for_cache [#{collection.name}] : #{model.to_h}"
+        # Volt.logger.debug "#{__FILE__}[#{__LINE__}]: induct_to_cache collection.name#{collection.name} loaded_from_repo=#{loaded_from_repo} #{model.to_h}"
 
         # Volt sets @new to false if any attribute changes - not what we want
         model.instance_variable_set(:@cache__stored, loaded_from_repo)
         model.instance_variable_set(:@cache__collection, collection)
         model.instance_variable_set(:@cache__associations, {})
         model.instance_variable_set(:@cache__marked_for_destruction, false)
-        # TODO: if model is not buffered, then trap all
-        # field set value methods and raise exception -
-        # unless buffered the model is read only.
 
         # create bunch of instance singleton methods
         # for association management
@@ -149,6 +146,10 @@ module Volt
           end
         end
 
+        if collection.read_only
+          # Volt.logger.debug "#{__FILE__}[#{__LINE__}]: Rnot defining write methods for #{model.to_h}"
+        end
+
         unless collection.read_only
           # Locks the model in the underlying repo.
           # Not yet implemented.
@@ -188,9 +189,10 @@ module Volt
           # - flush! is not (yet) an atomic transaction
           # - any part of it may fail without unwinding the whole
           def model.flush!
+            # debug_model __method__, __LINE__
             fail_if_read_only(__method__)
             if @cache__marked_for_destruction
-              # debug_model __method__, __LINE__, "marked for destruction so call destroy on #{to_h}"
+              debug_model __method__, __LINE__, "marked for destruction so call __destroy__ on #{to_h}"
               @cache__marked_for_destruction = false
               Promise.when(__destroy__, flush_associations)
             else
@@ -236,13 +238,19 @@ module Volt
           # to ensure cache integrity, otherwise super() called.
           # Returns a promise.
           def model.destroy(caller: nil)
+            debug_model __method__, __LINE__, "caller=#{caller}"
             fail_if_read_only(__method__)
+            debug_model __method__, __LINE__
             if caller.nil?
+              debug_model __method__, __LINE__, "marking for destruction"
               mark_for_destruction!
+              debug_model __method__, __LINE__, "flushing"
               flush!
             elsif caller.object_id != self.object_id
+              debug_model __method__, __LINE__
               raise RuntimeError, "#{__method__}: unexpected caller #{caller}"
             else
+              debug_model __method__, __LINE__
               super()
             end
           end
@@ -342,7 +350,7 @@ module Volt
         # Returns a promise with destroyed model proxy as value.
         # TODO: destroy any has_many association
         def model.__destroy__
-          # debug_model __method__, __LINE__
+          debug_model __method__, __LINE__
           fail_if_read_only(__method__)
           debug_model __method__, __LINE__
           promise = if stored?
