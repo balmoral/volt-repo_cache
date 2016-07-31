@@ -80,7 +80,11 @@ module Volt
       # Returns a promise with this cache as value
       # or error(s) if any occurred.
       def flush!
-        flushes = collections.values.map {|c| c.flush! }
+        flushes = collections.values.reject { |collection|
+          collection.read_only
+        }.map { |collection|
+          collection.flush!
+        }
         Promise.when(*flushes).then { self }
       end
 
