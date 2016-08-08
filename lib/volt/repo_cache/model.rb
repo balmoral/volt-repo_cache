@@ -238,19 +238,19 @@ module Volt
           # to ensure cache integrity, otherwise super() called.
           # Returns a promise.
           def model.destroy(caller: nil)
-            debug_model __method__, __LINE__, "caller=#{caller}"
+            # debug_model __method__, __LINE__, "caller=#{caller}"
             fail_if_read_only(__method__)
             debug_model __method__, __LINE__
             if caller.nil?
-              debug_model __method__, __LINE__, "marking for destruction"
+              # debug_model __method__, __LINE__, "marking for destruction"
               mark_for_destruction!
-              debug_model __method__, __LINE__, "flushing"
+              # debug_model __method__, __LINE__, "flushing"
               flush!
             elsif caller.object_id != self.object_id
-              debug_model __method__, __LINE__
+              # debug_model __method__, __LINE__
               raise RuntimeError, "#{__method__}: unexpected caller #{caller}"
             else
-              debug_model __method__, __LINE__
+              # debug_model __method__, __LINE__
               super()
             end
           end
@@ -350,17 +350,17 @@ module Volt
         # Returns a promise with destroyed model proxy as value.
         # TODO: destroy any has_many association
         def model.__destroy__
-          debug_model __method__, __LINE__
+          # debug_model __method__, __LINE__
           fail_if_read_only(__method__)
-          debug_model __method__, __LINE__
+          # debug_model __method__, __LINE__
           promise = if stored?
             destroy(caller: self)
           else
             Promise.value(self)
           end
-          debug_model __method__, __LINE__
+          # debug_model __method__, __LINE__
           promise.then do |result|
-            debug_model __method__, __LINE__, "destroy promise result => #{result}"
+            # debug_model __method__, __LINE__, "destroy promise result => #{result}"
             @cache__collection.destroyed(self, caller: self)
             uncache
             self
