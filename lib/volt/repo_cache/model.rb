@@ -240,7 +240,7 @@ module Volt
           def model.destroy(caller: nil)
             # debug_model __method__, __LINE__, "caller=#{caller}"
             fail_if_read_only(__method__)
-            debug_model __method__, __LINE__
+            # debug_model __method__, __LINE__
             if caller.nil?
               # debug_model __method__, __LINE__, "marking for destruction"
               mark_for_destruction!
