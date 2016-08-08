@@ -192,7 +192,7 @@ module Volt
             # debug_model __method__, __LINE__
             fail_if_read_only(__method__)
             if @cache__marked_for_destruction
-              debug_model __method__, __LINE__, "marked for destruction so call __destroy__ on #{to_h}"
+              # debug_model __method__, __LINE__, "marked for destruction so call __destroy__ on #{to_h}"
               @cache__marked_for_destruction = false
               Promise.when(__destroy__, flush_associations)
             else
