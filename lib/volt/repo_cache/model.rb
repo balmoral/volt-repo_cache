@@ -192,9 +192,11 @@ module Volt
             # debug_model __method__, __LINE__
             fail_if_read_only(__method__)
             if @cache__marked_for_destruction
-              # debug_model __method__, __LINE__, "marked for destruction so call __destroy__ on #{to_h}"
+              debug_model __method__, __LINE__, "marked for destruction so call __destroy__ on #{to_h}"
               @cache__marked_for_destruction = false
-              Promise.when(__destroy__, flush_associations)
+              Promise.when(__destroy__, flush_associations).then do |_|
+                nil
+              end
             else
               if dirty?
                 # debug_model __method__, __LINE__, "@cache__stored=#{@cache__stored} dirty?=#{dirty?} to_h=#{to_h}"
@@ -206,6 +208,7 @@ module Volt
                   @cache__stored = true
                   @cache__collection.repo_collection << self
                   # TODO: big problem! once new model saved it should become buffer in cache!
+                  Promise.value(self)
                 end
               else
                 # debug_model __method__, __LINE__, "not dirty: #{to_h}"
@@ -213,8 +216,6 @@ module Volt
                 # stay in the promise chain
                 Promise.value(self)
               end
-            end.then do
-              self
             end
           end
 

@@ -146,7 +146,8 @@ module Volt
       end
 
       # Create a new model from given hash and append it to the collection.
-      # Returns the new model
+      # Does not flush/save to db.
+      # Returns the new model.
       def create(hash = {})
         append(hash.to_h)
       end
